@@ -1,4 +1,4 @@
-"""Build an in-memory retriever and optional JSON chunk export."""
+"""Local document store, optional dense embeddings and optional CrossEncoder reranking."""
 import json
 from pathlib import Path
 from .chunking import chunk_text,load_documents
@@ -13,11 +13,19 @@ def build_passages(document_dir,chunk_size=500,overlap=80):
     return passages
 
 class RAGStore:
-    def __init__(self,document_dir,dense=False,chunk_size=500,overlap=80):
+    def __init__(self,document_dir,dense=False,chunk_size=500,overlap=80,
+                 rerank=False,rerank_candidates=20):
         self.passages=build_passages(document_dir,chunk_size,overlap)
         self.retriever=HybridRetriever(self.passages,dense=dense)
+        self.rerank_candidates=rerank_candidates
+        if rerank:
+            from .rerank import CrossEncoderReranker
+            self.reranker=CrossEncoderReranker()
+        else: self.reranker=None
     def query(self,question,k=4):
-        hits=self.retriever.search(question,k)
+        if k<1: return []
+        candidates=self.retriever.search(question,max(k,self.rerank_candidates) if self.reranker else k)
+        hits=self.reranker.rerank(question,candidates,k) if self.reranker else candidates[:k]
         return [{"source_id":p.source_id,"source":p.source,
                  "score":score,"text":p.text} for p,score in hits]
     def save_chunks(self,out):
