@@ -1,6 +1,6 @@
 # Agent Harness Lab — Tool-Calling Agent + Coding Tools + Hybrid RAG
 
-A compact, inspectable Python implementation of an **agent runtime and local retrieval-augmented generation pipeline**. Designed to grow into a Coding Agent and industrial-document multi-agent platform.
+A compact, inspectable Python implementation of an **agent runtime, persistent memory, resumable tool loop, sequential multi-agent orchestration and local retrieval-augmented generation pipeline**. Designed as a learning scaffold for coding agents and industrial-document workflows.
 
 **Status:** implementation scaffold, unit tests and offline demonstration provided. No live-provider evaluation or industrial integration has been executed yet. No claim of production sandbox security.
 
@@ -8,9 +8,9 @@ A compact, inspectable Python implementation of an **agent runtime and local ret
 
 | Module | Implemented capability |
 |---|---|
-| `harness/` | bounded model/tool execution loop, tool registry, JSONL trace writer, scripted and OpenAI-compatible providers |
-| `coding/` | allowlisted workspace file listing/reading/writing; path traversal rejection and file-size limits |
-| `rag/` | Markdown/TXT ingestion, overlapping chunking, BM25 retrieval, optional sentence-transformer dense embeddings and hybrid reciprocal rank fusion |
+| `harness/` | bounded model/tool execution loop, tool registry, JSONL traces, SQLite memory, JSON checkpoints/resume, sequential multi-agent orchestrator, scripted and OpenAI-compatible providers |
+| `coding/` | workspace file list/read/write; optional manually approved pytest runner (not registered as model tool) |
+| `rag/` | Markdown/TXT ingestion, overlapping chunking, BM25, optional dense/hybrid RRF, optional CrossEncoder reranking; labeled Recall@K/MRR/nDCG/HitRate evaluation |
 | `scripts/` | offline agent demonstration, standalone knowledge-base search |
 | `tests/` | retrieval, sandbox, tool loop tests |
 | `docs/` | papers and production-extension roadmap |
@@ -84,13 +84,64 @@ The provider sends `/chat/completions` requests. Your model must support OpenAI-
 
 **Safety:** this is educational code. The coding tools can overwrite files in the dedicated `workspace/` folder. The workspace checks reject absolute paths and `../` escapes, but they are **not a secure isolation boundary** against adversarial code or all filesystem races. There is deliberately no general shell-execution tool. Do not grant a model access to sensitive directories or use on untrusted code.
 
+## Phase 2: persistent Agent Memory
+
+Memory is **explicit key/value storage** in local SQLite, scoped by namespace. It is not automatic fact extraction or vector memory. The offline demo calls `memory_put` and `memory_get` tools and saves checkpoint state:
+
+```powershell
+python -m scripts.agent_memory_demo
+```
+
+See `harness/memory.py` for `MemoryStore`, `memory_search`, `memory_delete`, and `register_memory_tools`. The stored database is at `runs/demo_memory.sqlite3`, excluded from Git. Do not put credentials or sensitive user information in it.
+
+## Phase 2: resumable Agent execution
+
+`AgentRuntime(..., checkpoints=CheckpointStore("runs/checkpoints"))` supports `run(task,session_id="task-001")` and later `run(task,session_id="task-001",resume=True)`.
+
+State is saved after assistant/tool events. Successfully completed tool calls are not replayed. **If a crash occurs after invoking a side-effecting tool and before saving its observation, resume stops with `needs_review`**; do not automatically replay the operation. There is no automatic approval/resolution protocol or secure checkpoint encryption. See `tests/test_checkpoint.py`.
+
+## Phase 2: sequential Multi-Agent
+
+`harness/orchestrator.py` provides `AgentSpec` and `SequentialOrchestrator`; use it to connect retrieval, planning, and response agents in a fixed sequence. Previous agent output is passed as untrusted context, not authoritative evidence. Parallel scheduling, multi-agent graph routing and consensus are **not** implemented.
+
+## Phase 2: RAG Reranker and Evaluation
+
+Use `--rerank` for the optional pretrained CrossEncoder reranker (requires sentence-transformers):
+
+```powershell
+python -m pip install -e ".[dense]"
+python -m scripts.rag_search "citation policy" --rerank
+python -m scripts.rag_search "agent loop" --dense --rerank
+```
+
+The included `examples/rag_eval.jsonl` labels refer to source IDs in the toy knowledge base. Run labeled retrieval evaluation:
+
+```powershell
+python -m scripts.rag_evaluate
+python -m scripts.rag_evaluate --dense --rerank -k 5
+```
+
+Outputs `runs/retrieval_eval.json`: **Recall@K, MRR@K, nDCG@K and HitRate@K** plus per-question source IDs. These evaluate retrieval, **not generated-answer factuality or citation faithfulness**. A larger, hand-labeled held-out corpus is required before meaningful benchmarking.
+
+## Phase 2: manually approved Coding Agent test runner
+
+`coding/test_runner.py` runs `python -m pytest -q tests` only through an **explicitly approved CLI**:
+
+```powershell
+python -m scripts.run_tests --workspace workspace --approve --timeout 30
+```
+
+This **executes arbitrary test code**. A timeout and workspace path are *not* a security boundary. Run only code you own or trust in an isolated/disposable environment. The command is deliberately **not** exposed to the model as a tool.
+
+More detailed tradeoffs: [Phase 2 design and limitations](docs/phase2.md).
+
 ## RAG experiments to build next
 
 - Documents: PDF/OCR ingestion, multilingual embeddings, metadata/ACL, source versions.
-- Retrieval: BM25 vs dense vs hybrid, optional cross-encoder reranking, retrieval Recall@k/MRR/nDCG.
+- Retrieval: perform controlled BM25 vs dense vs hybrid+reranking ablations on a labeled held-out dataset; add multilingual domain embeddings.
 - Answering: grounded generation with enforced source citations, unsupported-claim detection and RAGAS-style evaluation.
-- Coding Agent: authorized diffs, git workflow, tests and explicit approval before unsafe operations.
-- Harness: state checkpointing, resumable workflows, costs/token budget, retries and multi-agent coordination.
+- Coding Agent: authorized diffs, git workflow, test execution in an actual OS/container sandbox, plus approvals.
+- Harness: safe resolution of ambiguous tool execution, state concurrency, retries, budget control and multi-agent task graphs.
 - Industrial adaptation: reuse rules/DSL and evidence schema *without uploading confidential datasets or proprietary code*.
 
 See [docs/reading-list.md](docs/reading-list.md).
