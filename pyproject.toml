@@ -1,0 +1,14 @@
+[project]
+name = "agent-harness-lab"
+version = "0.1.0"
+description = "Small agent runtime, safe coding tools, and local hybrid RAG"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dense = ["sentence-transformers>=3.0"]
+test = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
