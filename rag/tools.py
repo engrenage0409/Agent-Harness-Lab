@@ -6,5 +6,6 @@ def register_rag_tools(registry,store):
         {"type":"object","properties":{"query":{"type":"string"},
             "k":{"type":"integer","minimum":1,"maximum":10}},
          "required":["query"],"additionalProperties":False},
-        lambda query,k=4:store.query(query,max(1,min(int(k),10)))))
+        lambda query,k=4:store.query(query,max(1,min(int(k),10))),
+        retry_safe=True, max_transient_retries=1))
     return registry
