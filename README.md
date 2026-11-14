@@ -84,6 +84,43 @@ The provider sends `/chat/completions` requests. Your model must support OpenAI-
 
 **Safety:** this is educational code. The coding tools can overwrite files in the dedicated `workspace/` folder. The workspace checks reject absolute paths and `../` escapes, but they are **not a secure isolation boundary** against adversarial code or all filesystem races. There is deliberately no general shell-execution tool. Do not grant a model access to sensitive directories or use on untrusted code.
 
+## Local Qwen Model Server — Phase 1 (text only)
+
+This optional experiment serves an already cached Hugging Face Qwen model via a
+small FastAPI service. **No Ollama or model re-download is required.** It loads
+weights locally at server startup and serves `/health`, `/v1/models`, and
+`/v1/chat/completions`. Phase 1 accepts text chat messages but **does not yet
+support tool calls or streaming**; unsupported tool requests return HTTP 400
+instead of being silently ignored. The existing live `agent_demo` passes
+tools, so do not use it against this phase-one server yet.
+
+In Windows PowerShell:
+
+```powershell
+git pull origin main
+python -m pip install -e ".[serve,test]"
+python -m pytest -q
+$env:AGENT_MODEL="Qwen/Qwen2.5-0.5B-Instruct"
+python -m uvicorn serving.app:app --host 127.0.0.1 --port 8000
+```
+
+The server uses `local_files_only=True` and will fail startup if that model
+is not fully cached. Run the following request **in a second PowerShell window**:
+
+```powershell
+$body = @{
+    model = "Qwen/Qwen2.5-0.5B-Instruct"
+    messages = @(@{role="user"; content="Explain what an AI agent is in one sentence."})
+    max_tokens = 100
+} | ConvertTo-Json -Depth 6
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/v1/chat/completions" -Method Post -ContentType "application/json" -Body $body
+```
+
+The demo is intended for localhost only: no authentication, concurrency
+management, streaming, or production isolation. Follow-up phase: Qwen chat
+template support for tool calls and tool-result messages, so that the existing
+`OpenAICompatibleProvider` can call it from the real Agent Loop.
+
 ## Phase 2: persistent Agent Memory
 
 Memory is **explicit key/value storage** in local SQLite, scoped by namespace. It is not automatic fact extraction or vector memory. The offline demo calls `memory_put` and `memory_get` tools and saves checkpoint state:
