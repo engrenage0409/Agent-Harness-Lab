@@ -1,5 +1,5 @@
-import json
 """Model-free serving contract tests: no Qwen weights or GPU required."""
+import json
 import pytest
 
 pytest.importorskip("fastapi")
