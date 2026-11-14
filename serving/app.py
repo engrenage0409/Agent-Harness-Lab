@@ -102,6 +102,28 @@ def qwen_messages(messages: list[dict]):
     return converted
 
 
+def completed_tool_call(text: str) -> bool:
+    """Return True once the model has finished its first tool-call block."""
+    return "</tool_call>" in text
+
+
+class StopAfterFirstToolCall:
+    """Transformers stopping criterion, applied only when tools are offered.
+
+    End the generation at the FIRST closed tool_call, before the model has a
+    chance to speculate about subsequent dependent calls.
+    """
+
+    def __init__(self, tokenizer, prompt_tokens: int):
+        self.tokenizer = tokenizer
+        self.prompt_tokens = prompt_tokens
+
+    def __call__(self, input_ids, scores, **kwargs):
+        new_tokens = input_ids[0, self.prompt_tokens:]
+        generated_text = self.tokenizer.decode(new_tokens, skip_special_tokens=False)
+        return completed_tool_call(generated_text)
+
+
 class QwenBackend:
     """Loads cached weights once and generates a single text response."""
 
@@ -136,6 +158,11 @@ class QwenBackend:
         kwargs = {"max_new_tokens": max_tokens, "do_sample": temperature > 0}
         if temperature > 0:
             kwargs["temperature"] = temperature
+        if tools:
+            from transformers import StoppingCriteriaList
+            kwargs["stopping_criteria"] = StoppingCriteriaList([
+                StopAfterFirstToolCall(self.tokenizer, tokens.shape[-1])
+            ])
         with torch.inference_mode():
             output = self.model.generate(tokens, **kwargs)
         generated = output[0, tokens.shape[-1]:]
