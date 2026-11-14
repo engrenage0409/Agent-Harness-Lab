@@ -163,8 +163,11 @@ it does **not** establish full factual faithfulness. The demo checks for a
 successful search result, a successful file write, separate model turns, and an
 expected citation. It prints `end_to_end_verified`.
 In offline mode, the tool decisions and report text are scripted, not
-generated from retrieval. In live mode, the small model may fail to perform
-both calls; inspect the trace rather than treating `completed` as success.
+generated from retrieval. In live mode, the demo uses `AgentRuntime(completion_check=...)`: a final
+answer before the evidence-backed file write is rejected, with a corrective
+message added to the conversation. The loop remains bounded by `max_steps`,
+and each rejection is logged as `completion_rejected`. This does not guarantee
+that a small model will comply; inspect the trace and output file.
 Note that write_file overwrites files in the configured dedicated workspace;
 do not use sensitive workspaces.
 
