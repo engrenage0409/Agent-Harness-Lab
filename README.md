@@ -171,6 +171,32 @@ that a small model will comply; inspect the trace and output file.
 Note that write_file overwrites files in the configured dedicated workspace;
 do not use sensitive workspaces.
 
+## Tool Error Recovery — bounded and conservative
+
+The ToolRegistry validates argument types and required fields before invoking a
+handler. Invalid arguments and unknown tools return structured observations
+(`error` plus `error_category`), so the model can correct its next call.
+`AgentRuntime` records `tool_error` and `tool_retry` events in JSONL traces.
+
+Only tools **explicitly declared** `retry_safe=True` may automatically retry
+`TimeoutError` and `ConnectionError` (one additional attempt by default).
+`search_knowledge` opts in. A model-facing `write_file` remains non-retryable
+because an interrupted write might have already changed state. Other exceptions
+do not trigger automatic retries. The run is still bounded by `max_steps`.
+
+The multi-tool demo also rejects any bracketed `#chunk-N` citations that
+were not returned by its search result, even if another real citation is present.
+This prevents the earlier `[citation.md#chunk-0]` error but does not validate
+all natural-language factual claims.
+
+```powershell
+git pull origin main
+python -m pytest -q
+python -m scripts.multi_tool_demo
+python -m scripts.multi_tool_demo --live
+Get-Content runs/multi_tool_demo.jsonl -Tail 12
+```
+
 ## Phase 2: persistent Agent Memory
 
 Memory is **explicit key/value storage** in local SQLite, scoped by namespace. It is not automatic fact extraction or vector memory. The offline demo calls `memory_put` and `memory_get` tools and saves checkpoint state:
