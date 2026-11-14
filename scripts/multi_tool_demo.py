@@ -51,6 +51,7 @@ class EvidenceFirstRegistry(ToolRegistry):
         ]
 
     def execute(self, name, arguments):
+        self.last_events = []
         if name not in self.exposed:
             return {"error": "Tool is not allowed in this phase. Read the previous tool results before making another call."}
         if name == "write_file":
