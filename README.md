@@ -153,8 +153,13 @@ python -m scripts.multi_tool_demo --live
 ```
 
 Review `runs/multi_tool_demo.jsonl` and `workspace/citation_report.md`.
-The demo checks for a successful search result, a successful file write, their
-tool-call order, and an expected citation. It prints `end_to_end_verified`.
+The demo now uses a task-specific evidence-first tool gate: first only
+`search_knowledge` is visible and executable; after its tool observation, only
+`write_file` is available. Writing also requires a source ID returned by the
+search. This blocks same-turn dependent writes and checks basic citation presence;
+it does **not** establish full factual faithfulness. The demo checks for a
+successful search result, a successful file write, separate model turns, and an
+expected citation. It prints `end_to_end_verified`.
 In offline mode, the tool decisions and report text are scripted, not
 generated from retrieval. In live mode, the small model may fail to perform
 both calls; inspect the trace rather than treating `completed` as success.
