@@ -1,6 +1,7 @@
 """Minimal JSON-schema-like tool contracts without runtime dependencies."""
 from dataclasses import dataclass
 from typing import Callable, Any
+from jsonschema import validate, ValidationError
 
 @dataclass
 class Tool:
@@ -35,6 +36,10 @@ class ToolRegistry:
         unknown=set(arguments)-allowed
         if missing or unknown:
             return {"error":f"Invalid arguments. Missing={sorted(missing)} unexpected={sorted(unknown)}"}
+        try:
+            validate(instance=arguments, schema=tool.parameters)
+        except ValidationError as exc:
+            return {"error":f"Invalid tool arguments: {exc.message}"}
         try:
             return tool.handler(**arguments)
         except Exception as exc:
