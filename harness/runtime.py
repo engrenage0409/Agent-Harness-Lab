@@ -11,13 +11,15 @@ class RunResult:
     status: str
 
 class AgentRuntime:
-    def __init__(self,provider,registry,max_steps=8,trace_path=None,checkpoints=None):
+    def __init__(self,provider,registry,max_steps=8,trace_path=None,checkpoints=None,
+                 completion_check=None):
         if max_steps<1: raise ValueError("max_steps must be positive")
         self.provider=provider
         self.registry=registry
         self.max_steps=max_steps
         self.trace=TraceWriter(trace_path)
         self.checkpoints=checkpoints
+        self.completion_check=completion_check
     def run(self,task,system="Use tools when useful. Cite retrieved sources using [source_id].",
             session_id=None,resume=False):
         if resume and (not session_id or self.checkpoints is None):
@@ -77,6 +79,14 @@ class AgentRuntime:
             persist("running")
             self.trace.emit("assistant",step=step,content=content,tool_calls=tool_calls)
             if not pending:
+                # Optional task-specific success check. A fluent final answer is
+                # not proof that the requested side effects have happened.
+                feedback = self.completion_check(messages) if self.completion_check else None
+                if feedback:
+                    messages.append({"role":"user","content":feedback})
+                    persist("running")
+                    self.trace.emit("completion_rejected",step=step,reason=feedback)
+                    continue
                 persist("completed",content)
                 self.trace.emit("run_finished",status="completed",steps=step)
                 return RunResult(content,step,messages,"completed")
