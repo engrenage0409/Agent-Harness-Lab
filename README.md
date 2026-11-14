@@ -131,6 +131,36 @@ prove that retrieval happened. This is a learning implementation, not a
 production-safe service. It is localhost-only, without authentication,
 concurrency controls or streaming.
 
+## Sequential tool calling: search and save
+
+This demonstration reuses the existing AgentRuntime, RAG `search_knowledge`, and
+allowlisted workspace `write_file`. It asks the agent to retrieve the citation
+policy and save `workspace/citation_report.md` with a source ID.
+
+Offline deterministic integration check (no model server needed):
+
+```powershell
+python -m scripts.multi_tool_demo
+```
+
+To run with Qwen instead, first start the local model server described above,
+then in another PowerShell terminal:
+
+```powershell
+$env:AGENT_BASE_URL="http://127.0.0.1:8000/v1"
+$env:AGENT_MODEL="Qwen/Qwen2.5-0.5B-Instruct"
+python -m scripts.multi_tool_demo --live
+```
+
+Review `runs/multi_tool_demo.jsonl` and `workspace/citation_report.md`.
+The demo checks for a successful search result, a successful file write, their
+tool-call order, and an expected citation. It prints `end_to_end_verified`.
+In offline mode, the tool decisions and report text are scripted, not
+generated from retrieval. In live mode, the small model may fail to perform
+both calls; inspect the trace rather than treating `completed` as success.
+Note that write_file overwrites files in the configured dedicated workspace;
+do not use sensitive workspaces.
+
 ## Phase 2: persistent Agent Memory
 
 Memory is **explicit key/value storage** in local SQLite, scoped by namespace. It is not automatic fact extraction or vector memory. The offline demo calls `memory_put` and `memory_get` tools and saves checkpoint state:
