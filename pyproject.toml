@@ -9,6 +9,11 @@ dependencies = ["jsonschema>=4.0"]
 dense = ["sentence-transformers>=3.0"]
 test = ["pytest>=8"]
 
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["harness", "harness.*", "coding", "coding.*", "rag", "rag.*", "scripts", "scripts.*"]
+exclude = ["tests", "tests.*", "runs", "runs.*", "workspace", "workspace.*"]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
