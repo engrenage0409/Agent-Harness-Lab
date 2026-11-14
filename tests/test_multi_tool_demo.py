@@ -70,3 +70,25 @@ def test_write_is_blocked_until_a_new_model_turn(tmp_path):
     assert saved == {"saved": "citation_report.md"}
     assert registry.stage == "done"
     assert registry.definitions() == []
+
+
+def test_rejects_unknown_citation_even_with_valid_citation(tmp_path):
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "policy.md").write_text("Cite [policy.md#chunk-0].", encoding="utf-8")
+    registry = EvidenceFirstRegistry()
+    register_coding_tools(registry, tmp_path / "workspace")
+    register_rag_tools(registry, RAGStore(docs))
+    registry.definitions()
+    hits = registry.execute("search_knowledge", {"query": "cite"})
+    assert hits
+    registry.definitions()
+    result = registry.execute("write_file", {
+        "path": "citation_report.md",
+        "content": (
+            "Valid [policy.md#chunk-0], but fabricated [citation.md#chunk-0]."
+        ),
+    })
+    assert "error" in result
+    assert registry.stage == "write"
+    assert not (tmp_path / "workspace" / "citation_report.md").exists()
