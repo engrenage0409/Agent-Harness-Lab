@@ -109,7 +109,29 @@ def run_demo(*, live=False, docs="examples/knowledge", workspace="workspace",
     work = register_coding_tools(registry, workspace)
     register_rag_tools(registry, RAGStore(docs))
     provider = OpenAICompatibleProvider() if live else demo_provider()
-    result = AgentRuntime(provider, registry, max_steps=6, trace_path=trace).run(task)
+
+    def completion_check(messages):
+        if registry.stage == "search":
+            return (
+                "The task is not finished. You must call search_knowledge first "
+                "and use its returned source IDs. Do not give a final answer yet."
+            )
+        if registry.stage == "write":
+            return (
+                "The search has finished, but you have NOT saved the requested file. "
+                "Do not claim it was saved. Your next response must call write_file "
+                "with exactly path='citation_report.md' and a concise Markdown "
+                "content containing the factual rule from the tool result and "
+                f"a citation such as [{next(iter(sorted(registry.source_ids)))}]. "
+                "Use the field names path and content, not file_name. "
+                "Then wait for the tool result before answering."
+            )
+        return None
+
+    result = AgentRuntime(
+        provider, registry, max_steps=6, trace_path=trace,
+        completion_check=completion_check,
+    ).run(task)
 
     observed = []
     for msg in result.messages:
