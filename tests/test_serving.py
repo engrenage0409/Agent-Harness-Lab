@@ -5,7 +5,8 @@ import pytest
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 from fastapi.testclient import TestClient
-from serving.app import create_app, parse_qwen_tool_calls, qwen_messages
+from serving.app import (create_app, parse_qwen_tool_calls, qwen_messages,
+                         completed_tool_call, StopAfterFirstToolCall)
 
 
 class FakeBackend:
@@ -119,3 +120,29 @@ def test_malformed_tool_call_reports_token_limit(monkeypatch):
         assert "Invalid JSON in Qwen tool call" in detail
         assert "completion_tokens=4" in detail
         assert "generation_limit_reached=False" in detail
+
+
+def test_stop_after_first_complete_tool_call():
+    """Simulate token-by-token decoding without loading Transformers or a model."""
+    class FakeTokenizer:
+        def decode(self, tokens, skip_special_tokens=False):
+            return "".join(chr(token) for token in tokens)
+
+    class FakeIds:
+        def __init__(self, content):
+            self.content = content
+
+        def __getitem__(self, key):
+            row, selection = key
+            assert row == 0
+            return [ord(character) for character in self.content][selection]
+
+    criterion = StopAfterFirstToolCall(FakeTokenizer(), 0)
+    prefix = '<tool_call>{"name":"search_knowledge","arguments":{"query":"citation policy"}}'
+    assert not completed_tool_call(prefix)
+    assert not criterion(FakeIds(prefix), None)
+    closed = prefix + '</tool_call>'
+    assert completed_tool_call(closed)
+    assert criterion(FakeIds(closed), None)
+    # The model must stop before starting a second dependent write_file call.
+    assert not ('<tool_call>' in closed[len(prefix):])
