@@ -58,6 +58,15 @@ class AgentRuntime:
                 call["in_flight"]=True
                 persist("running")
                 observation=self.registry.execute(name,args)
+                for event in getattr(self.registry, "last_events", []):
+                    self.trace.emit(event["event"], step=step,
+                                    name=event["name"], attempt=event["attempt"],
+                                    category=event["category"],
+                                    retry_safe=event["retry_safe"])
+                if isinstance(observation, dict) and "error" in observation:
+                    self.trace.emit("tool_error", step=step, name=name,
+                                    category=observation.get("error_category", "tool_error"),
+                                    error=observation["error"])
                 messages.append({"role":"tool","tool_call_id":call.get("id","unknown"),
                                  "content":json.dumps(observation,ensure_ascii=False,default=str)})
                 pending.pop(0)
