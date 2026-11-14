@@ -2,6 +2,7 @@
 import json
 import os
 from urllib.request import Request,urlopen
+from urllib.error import HTTPError
 
 class ScriptedProvider:
     def __init__(self,responses):
@@ -29,6 +30,18 @@ class OpenAICompatibleProvider:
         if self.api_key: headers["Authorization"]="Bearer "+self.api_key
         req=Request(self.base_url+"/chat/completions",
                     data=json.dumps(payload).encode("utf-8"),headers=headers,method="POST")
-        with urlopen(req,timeout=self.timeout) as response:
-            obj=json.load(response)
+        try:
+            with urlopen(req,timeout=self.timeout) as response:
+                obj=json.load(response)
+        except HTTPError as exc:
+            # Local debugging: FastAPI returns a useful JSON {"detail": "..."}.
+            # Do not expose request headers, keys, or full response bodies.
+            body=exc.read(4096).decode("utf-8",errors="replace")
+            try:
+                detail=json.loads(body).get("detail",body)
+            except (ValueError,AttributeError):
+                detail=body
+            raise RuntimeError(
+                f"Model server returned HTTP {exc.code}: {str(detail)[:500]}"
+            ) from exc
         return obj["choices"][0]["message"]
