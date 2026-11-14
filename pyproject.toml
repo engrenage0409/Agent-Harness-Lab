@@ -8,10 +8,11 @@ dependencies = ["jsonschema>=4.0"]
 [project.optional-dependencies]
 dense = ["sentence-transformers>=3.0"]
 test = ["pytest>=8"]
+serve = ["fastapi>=0.115", "uvicorn>=0.30", "transformers>=4.50", "torch>=2.2", "httpx>=0.27"]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["harness", "harness.*", "coding", "coding.*", "rag", "rag.*", "scripts", "scripts.*"]
+include = ["harness", "harness.*", "coding", "coding.*", "rag", "rag.*", "scripts", "scripts.*", "serving", "serving.*"]
 exclude = ["tests", "tests.*", "runs", "runs.*", "workspace", "workspace.*"]
 
 [tool.pytest.ini_options]
