@@ -103,3 +103,19 @@ def test_invalid_model_is_rejected():
             "messages": [{"role": "user", "content": "Hi"}],
         })
         assert response.status_code == 404
+
+
+def test_malformed_tool_call_reports_token_limit(monkeypatch):
+    backend = FakeBackend()
+    backend.next_output = '<tool_call>{"name":"search_knowledge","arguments":{bad}}</tool_call>'
+    with TestClient(create_app(backend, model_id="test-qwen")) as client:
+        response = client.post("/v1/chat/completions", json={
+            "model": "test-qwen",
+            "messages": [{"role": "user", "content": "Search"}],
+            "tools": [{"type": "function", "function": {"name": "search_knowledge"}}],
+        })
+        assert response.status_code == 502
+        detail = response.json()["detail"]
+        assert "Invalid JSON in Qwen tool call" in detail
+        assert "completion_tokens=4" in detail
+        assert "generation_limit_reached=False" in detail
