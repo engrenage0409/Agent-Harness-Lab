@@ -84,15 +84,15 @@ The provider sends `/chat/completions` requests. Your model must support OpenAI-
 
 **Safety:** this is educational code. The coding tools can overwrite files in the dedicated `workspace/` folder. The workspace checks reject absolute paths and `../` escapes, but they are **not a secure isolation boundary** against adversarial code or all filesystem races. There is deliberately no general shell-execution tool. Do not grant a model access to sensitive directories or use on untrusted code.
 
-## Local Qwen Model Server — Phase 1 (text only)
+## Local Qwen Model Server — text and tool calling
 
 This optional experiment serves an already cached Hugging Face Qwen model via a
 small FastAPI service. **No Ollama or model re-download is required.** It loads
 weights locally at server startup and serves `/health`, `/v1/models`, and
-`/v1/chat/completions`. Phase 1 accepts text chat messages but **does not yet
-support tool calls or streaming**; unsupported tool requests return HTTP 400
-instead of being silently ignored. The existing live `agent_demo` passes
-tools, so do not use it against this phase-one server yet.
+`/v1/chat/completions`. The server supports Qwen2.5 Hermes-style `<tool_call>` parsing and tool-result
+history for the existing live AgentRuntime. Streaming is not implemented.
+Malformed or unknown tool calls fail explicitly. Actual tool execution,
+argument checks and trace logging are handled by the Harness, not the server.
 
 In Windows PowerShell:
 
@@ -116,10 +116,20 @@ $body = @{
 Invoke-RestMethod -Uri "http://127.0.0.1:8000/v1/chat/completions" -Method Post -ContentType "application/json" -Body $body
 ```
 
-The demo is intended for localhost only: no authentication, concurrency
-management, streaming, or production isolation. Follow-up phase: Qwen chat
-template support for tool calls and tool-result messages, so that the existing
-`OpenAICompatibleProvider` can call it from the real Agent Loop.
+In a second PowerShell window, run the live Agent Loop with the server already
+running in the first window:
+
+```powershell
+$env:AGENT_BASE_URL="http://127.0.0.1:8000/v1"
+$env:AGENT_MODEL="Qwen/Qwen2.5-0.5B-Instruct"
+python -m scripts.agent_demo --live --task "Search the knowledge base for citation rules and cite the source_id you find."
+```
+
+Inspect `runs/demo.jsonl` for `assistant` and `tool_result` events. A 0.5B
+model can fail to select the correct tool; a completed status alone does not
+prove that retrieval happened. This is a learning implementation, not a
+production-safe service. It is localhost-only, without authentication,
+concurrency controls or streaming.
 
 ## Phase 2: persistent Agent Memory
 
