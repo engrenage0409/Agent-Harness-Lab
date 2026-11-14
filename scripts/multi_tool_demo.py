@@ -23,6 +23,58 @@ DEFAULT_TASK = (
 )
 
 
+
+class EvidenceFirstRegistry(ToolRegistry):
+    """Demo-specific gate: search must complete before a write can be requested.
+
+    Each model turn sees only the tool allowed in that stage. The executor also
+    enforces this policy, rather than trusting model/tool schema compliance.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.stage = "search"
+        self.exposed = set()
+        self.source_ids = set()
+
+    def definitions(self):
+        allowed = {
+            "search": {"search_knowledge"},
+            "write": {"write_file"},
+            "done": set(),
+        }[self.stage]
+        self.exposed = allowed.copy()
+        return [
+            tool.definition() for name, tool in self.tools.items()
+            if name in allowed
+        ]
+
+    def execute(self, name, arguments):
+        if name not in self.exposed:
+            return {"error": "Tool is not allowed in this phase. Read the previous tool results before making another call."}
+        if name == "write_file":
+            if not isinstance(arguments, dict):
+                return {"error": "Tool arguments must be an object"}
+            if arguments.get("path") != DEFAULT_OUTPUT:
+                return {"error": f"Only {DEFAULT_OUTPUT} is allowed in this demo"}
+            content = arguments.get("content")
+            if not isinstance(content, str) or not any(
+                f"[{source_id}]" in content for source_id in self.source_ids
+            ):
+                return {"error": "Report must cite an actual source_id returned by search_knowledge"}
+        result = super().execute(name, arguments)
+        if name == "search_knowledge" and isinstance(result, list) and result:
+            self.source_ids = {
+                hit["source_id"] for hit in result
+                if isinstance(hit, dict) and isinstance(hit.get("source_id"), str)
+            }
+            if self.source_ids:
+                self.stage = "write"
+        elif name == "write_file" and isinstance(result, dict) and result.get("saved") == DEFAULT_OUTPUT:
+            self.stage = "done"
+        return result
+
+
 def tool_call(call_id, name, arguments):
     return {
         "id": call_id,
@@ -53,7 +105,7 @@ def demo_provider():
 
 def run_demo(*, live=False, docs="examples/knowledge", workspace="workspace",
              trace="runs/multi_tool_demo.jsonl", task=DEFAULT_TASK):
-    registry = ToolRegistry()
+    registry = EvidenceFirstRegistry()
     work = register_coding_tools(registry, workspace)
     register_rag_tools(registry, RAGStore(docs))
     provider = OpenAICompatibleProvider() if live else demo_provider()
@@ -97,10 +149,12 @@ def run_demo(*, live=False, docs="examples/knowledge", workspace="workspace",
     exists = target.is_file() and write_observed
     report = target.read_text(encoding="utf-8") if exists else ""
     verified = (
-        result.status == "completed"
+        registry.stage == "done"
+        and result.status == "completed"
         and search_observed
         and write_observed
         and observed.index("search_knowledge") < observed.index("write_file")
+        and result.steps >= 3
         and "[policy.md#chunk-0]" in report
     ) if "search_knowledge" in observed and "write_file" in observed else False
     return {
