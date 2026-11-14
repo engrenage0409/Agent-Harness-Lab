@@ -59,7 +59,7 @@ class EvidenceFirstRegistry(ToolRegistry):
             if arguments.get("path") != DEFAULT_OUTPUT:
                 return {"error": f"Only {DEFAULT_OUTPUT} is allowed in this demo"}
             content = arguments.get("content")
-            citations = set(re.findall(r"\\[([^\\]\\n]+#chunk-\\d+)\\]", content)) if isinstance(content, str) else set()
+            citations = set(re.findall(r"\[([^\]\n]+#chunk-\d+)\]", content)) if isinstance(content, str) else set()
             if not citations or not citations.issubset(self.source_ids):
                 return {"error": "Report must cite only source_ids returned by search_knowledge"}
         result = super().execute(name, arguments)
@@ -177,8 +177,8 @@ def run_demo(*, live=False, docs="examples/knowledge", workspace="workspace",
         and write_observed
         and observed.index("search_knowledge") < observed.index("write_file")
         and result.steps >= 3
-        and bool(set(re.findall(r"\\[([^\\]\\n]+#chunk-\\d+)\\]", report)))
-        and set(re.findall(r"\\[([^\\]\\n]+#chunk-\\d+)\\]", report)).issubset(registry.source_ids)
+        and bool(set(re.findall(r"\[([^\]\n]+#chunk-\d+)\]", report)))
+        and set(re.findall(r"\[([^\]\n]+#chunk-\d+)\]", report)).issubset(registry.source_ids)
     ) if "search_knowledge" in observed and "write_file" in observed else False
     return {
         "status": result.status,
