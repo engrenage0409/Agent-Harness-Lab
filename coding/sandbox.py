@@ -15,7 +15,7 @@ class Workspace:
             raise ValueError("Path escapes workspace")
         return candidate
     def list_files(self):
-        return sorted(str(x.relative_to(self.root)) for x in self.root.rglob("*")
+        return sorted(x.relative_to(self.root).as_posix() for x in self.root.rglob("*")
                       if x.is_file() and x.resolve().is_relative_to(self.root))[:200]
     def read(self,path):
         p=self.resolve(path)
@@ -26,7 +26,7 @@ class Workspace:
         p=self.resolve(path)
         p.parent.mkdir(parents=True,exist_ok=True)
         p.write_text(content,encoding="utf-8")
-        return {"saved":str(p.relative_to(self.root))}
+        return {"saved":p.relative_to(self.root).as_posix()}
 
 def register_coding_tools(registry:ToolRegistry,root):
     workspace=Workspace(root)

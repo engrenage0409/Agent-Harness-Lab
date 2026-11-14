@@ -70,3 +70,17 @@ def test_write_is_blocked_until_a_new_model_turn(tmp_path):
     assert saved == {"saved": "citation_report.md"}
     assert registry.stage == "done"
     assert registry.definitions() == []
+
+
+def test_wrong_write_field_does_not_create_file(tmp_path):
+    registry = EvidenceFirstRegistry()
+    register_coding_tools(registry, tmp_path)
+    registry.stage = "write"
+    registry.source_ids = {"policy.md#chunk-0"}
+    registry.definitions()
+    result = registry.execute("write_file", {
+        "file_name": "citation_report.md", "content": "Rule [policy.md#chunk-0]",
+    })
+    assert "error" in result
+    assert registry.stage == "write"
+    assert not (tmp_path / "citation_report.md").exists()

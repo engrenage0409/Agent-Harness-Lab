@@ -146,3 +146,36 @@ def test_stop_after_first_complete_tool_call():
     assert criterion(FakeIds(closed), None)
     # The model must stop before starting a second dependent write_file call.
     assert not ('<tool_call>' in closed[len(prefix):])
+
+
+def test_tags_inside_json_strings_are_not_boundaries():
+    arguments = {"path": "citation_report.md", "content": 'Literal </tool_call> and "quoted" text\\end'}
+    body = '<tool_call>' + json.dumps({"name": "write_file", "arguments": arguments})
+    assert not completed_tool_call(body)
+    content, calls = parse_qwen_tool_calls(body + '</tool_call>')
+    assert content is None
+    assert json.loads(calls[0]["function"]["arguments"]) == arguments
+
+
+def test_malformed_output_retries_once_then_succeeds():
+    class RecoveringBackend(FakeBackend):
+        def generate(self, *args):
+            result = super().generate(*args)
+            self.next_output = '<tool_call>{"name":"write_file","arguments":{"path":"citation_report.md","content":"Rule [policy.md#chunk-0]"}}</tool_call>'
+            return result
+    backend = RecoveringBackend()
+    backend.next_output = '<tool_call>{bad}</tool_call>'
+    with TestClient(create_app(backend, model_id="test-qwen")) as client:
+        response = client.post('/v1/chat/completions', json={
+            'model': 'test-qwen', 'messages': [{'role': 'user', 'content': 'Save report'}],
+            'tools': [{'type': 'function', 'function': {'name': 'write_file'}}],
+        })
+    assert response.status_code == 200
+    assert len(backend.calls) == 2
+    assert response.json()['usage']['completion_tokens'] == 8
+    assert response.json()['choices'][0]['finish_reason'] == 'tool_calls'
+
+
+def test_incomplete_second_call_is_not_silently_executed():
+    with pytest.raises(ValueError):
+        parse_qwen_tool_calls('<tool_call>{"name":"search","arguments":{}}</tool_call><tool_call>{')
