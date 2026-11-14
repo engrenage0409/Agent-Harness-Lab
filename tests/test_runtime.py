@@ -60,3 +60,52 @@ def test_tool_registry_enforces_numeric_bounds():
     assert "error" in registry.execute("limited", {"value": 11})
     assert "error" in registry.execute("limited", {"value": True})
     assert registry.execute("limited", {"value": 5}) == 5
+
+
+def test_completion_check_reprompts_instead_of_false_success(tmp_path):
+    registry = ToolRegistry()
+    performed = []
+    registry.add(Tool(
+        "write_file",
+        "Save a file",
+        {"type": "object", "properties": {"path": {"type": "string"}},
+         "required": ["path"], "additionalProperties": False},
+        lambda path: performed.append(path) or {"saved": path},
+    ))
+    scripted = ScriptedProvider([
+        {"role": "assistant", "content": "Done!"},
+        {"role": "assistant", "content": "",
+         "tool_calls": [{"id": "write1", "type": "function",
+                         "function": {"name": "write_file",
+                                      "arguments": json.dumps({"path": "report.md"})}}]},
+        {"role": "assistant", "content": "Saved report.md"},
+    ])
+    result = AgentRuntime(
+        scripted, registry, max_steps=5,
+        trace_path=tmp_path / "run.jsonl",
+        completion_check=lambda messages: (
+            "You have not saved report.md. Call write_file."
+            if not performed else None
+        ),
+    ).run("Save report.md")
+    assert result.status == "completed"
+    assert result.steps == 3
+    assert performed == ["report.md"]
+    assert any(m.get("role") == "user" and "not saved" in m.get("content", "")
+               for m in result.messages)
+    assert '"event": "completion_rejected"' in (
+        tmp_path / "run.jsonl"
+    ).read_text(encoding="utf-8")
+
+
+def test_completion_check_respects_max_steps():
+    scripted = ScriptedProvider([
+        {"role": "assistant", "content": "Done."},
+        {"role": "assistant", "content": "Still done."},
+    ])
+    result = AgentRuntime(
+        scripted, ToolRegistry(), max_steps=2,
+        completion_check=lambda messages: "Missing required output",
+    ).run("Create output")
+    assert result.status == "max_steps_exceeded"
+    assert result.steps == 2
