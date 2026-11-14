@@ -4,6 +4,7 @@ Supports non-streaming text chat and Qwen2.5 Hermes-style function calling.
 Run locally: python -m uvicorn serving.app:app --host 127.0.0.1 --port 8000
 """
 import json
+import logging
 import os
 import re
 import time
@@ -15,6 +16,7 @@ from pydantic import BaseModel, Field
 
 
 MODEL_ID = os.getenv("AGENT_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
+logger = logging.getLogger(__name__)
 
 
 class ChatMessage(BaseModel):
@@ -51,7 +53,7 @@ def parse_qwen_tool_calls(text: str):
         try:
             obj = json.loads(match.group(1))
         except json.JSONDecodeError as exc:
-            raise ValueError("Invalid JSON in Qwen tool call") from exc
+            raise ValueError(f"Invalid JSON in Qwen tool call at character {exc.pos}: {exc.msg}") from exc
         if not isinstance(obj, dict) or not isinstance(obj.get("name"), str):
             raise ValueError("Qwen tool call is missing a function name")
         if not isinstance(obj.get("arguments"), dict):
@@ -187,7 +189,23 @@ def create_app(backend=None, model_id: str | None = None):
                 request.temperature,
                 allowed_tools,
             )
-            content, tool_calls = parse_qwen_tool_calls(text)
+            try:
+                content, tool_calls = parse_qwen_tool_calls(text)
+            except ValueError as exc:
+                # Do not log raw model output unless explicitly requested.
+                if os.getenv("AGENT_DEBUG_OUTPUT") == "1":
+                    logger.warning("Rejected Qwen output (first 600 chars): %r", text[:600])
+                truncated = completion_tokens >= request.max_tokens
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        f"{exc}; completion_tokens={completion_tokens}; "
+                        f"max_tokens={request.max_tokens}; "
+                        f"generation_limit_reached={truncated}. "
+                        "Enable AGENT_DEBUG_OUTPUT=1 on the server for a limited "
+                        "raw model-output snippet."
+                    ),
+                ) from exc
         except ValueError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         if tool_calls and not allowed_tools:
