@@ -138,7 +138,7 @@ class QwenBackend:
             output = self.model.generate(tokens, **kwargs)
         generated = output[0, tokens.shape[-1]:]
         return (
-            self.tokenizer.decode(generated, skip_special_tokens=True),
+            self.tokenizer.decode(generated, skip_special_tokens=False).split("<|im_end|>")[0],
             int(tokens.shape[-1]),
             int(generated.shape[-1]),
         )
