@@ -56,7 +56,8 @@ class RepairTools(ToolRegistry):
         self.successful_edits = 0
         self.phase = "test"  # test -> read -> edit -> verify; failed edit -> read
         self.exposed = set()
-        self.checkpoint = FileCheckpoint(self.workspace.resolve(TARGET))
+        target = self.workspace.resolve(TARGET)
+        self.checkpoint = FileCheckpoint(target) if target.is_file() else None
         self.progress = ProgressTracker(repeat_limit=3)
 
         self.add(Tool(
@@ -106,7 +107,7 @@ class RepairTools(ToolRegistry):
             )
         # ToolRegistry handles schema validation and returns structured errors.
         previous_phase = self.phase
-        source_hash = self.checkpoint.expected_hash
+        source_hash = self.checkpoint.expected_hash if self.checkpoint else "missing"
         result = super().execute(name, arguments)
         if self.phase != previous_phase:
             # No further call in this reply may reuse the previous phase.
@@ -133,9 +134,11 @@ class RepairTools(ToolRegistry):
 
     def edit_file(self, path, old_text, new_text):
         self._check_path(path)
-        self.checkpoint.ensure_unchanged()
+        if self.checkpoint:
+            self.checkpoint.ensure_unchanged()
         result = self.workspace.edit(path, old_text, new_text)
-        self.checkpoint.record_edit()
+        if self.checkpoint:
+            self.checkpoint.record_edit()
         self.progress.reset()
         self.edit_version += 1
         self.successful_edits += 1
