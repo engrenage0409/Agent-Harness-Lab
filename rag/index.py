@@ -16,7 +16,8 @@ class RAGStore:
     def __init__(self,document_dir,dense=False,chunk_size=500,overlap=80,
                  rerank=False,rerank_candidates=20,backend="local",milvus_uri="runs/rag_milvus.db",model_name=None):
         self.passages=build_passages(document_dir,chunk_size,overlap)
-        self.retriever=HybridRetriever(self.passages,dense=dense,backend=backend,\n                                         milvus_uri=milvus_uri,model_name=model_name)
+        self.retriever=HybridRetriever(self.passages,dense=dense,backend=backend,
+                                         milvus_uri=milvus_uri,model_name=model_name)
         self.rerank_candidates=rerank_candidates
         if rerank:
             from .rerank import CrossEncoderReranker
