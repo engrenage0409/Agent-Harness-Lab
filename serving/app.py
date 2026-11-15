@@ -6,7 +6,6 @@ Run locally: python -m uvicorn serving.app:app --host 127.0.0.1 --port 8000
 import json
 import logging
 import os
-import re
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -37,12 +36,38 @@ class ChatRequest(BaseModel):
     tool_choice: str | dict | None = None
 
 
-TOOL_CALL_PATTERN = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
+def tool_call_blocks(text):
+    """Locate closing tags only outside JSON strings (including escaped quotes)."""
+    start = 0
+    while True:
+        opening = text.find("<tool_call>", start)
+        if opening < 0:
+            return
+        body = opening + len("<tool_call>")
+        quoted = escaped = False
+        for pos in range(body, len(text)):
+            char = text[pos]
+            if quoted:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    quoted = False
+            elif char == '"':
+                quoted = True
+            elif text.startswith("</tool_call>", pos):
+                end = pos + len("</tool_call>")
+                yield opening, end, text[body:pos]
+                start = end
+                break
+        else:
+            return
 
 
 def parse_qwen_tool_calls(text: str):
     """Convert Qwen's tool tags to OpenAI-style calls without executing tools."""
-    matches = list(TOOL_CALL_PATTERN.finditer(text))
+    matches = list(tool_call_blocks(text))
     if not matches:
         if "<tool_call>" in text or "</tool_call>" in text:
             raise ValueError("Incomplete Qwen tool-call tags")
@@ -51,7 +76,7 @@ def parse_qwen_tool_calls(text: str):
     calls = []
     for match in matches:
         try:
-            obj = json.loads(match.group(1))
+            obj = json.loads(match[2])
         except json.JSONDecodeError as exc:
             raise ValueError(f"Invalid JSON in Qwen tool call at character {exc.pos}: {exc.msg}") from exc
         if not isinstance(obj, dict) or not isinstance(obj.get("name"), str):
@@ -66,7 +91,13 @@ def parse_qwen_tool_calls(text: str):
                 "arguments": json.dumps(obj["arguments"], ensure_ascii=False),
             },
         })
-    content = TOOL_CALL_PATTERN.sub("", text).strip()
+    pieces = []
+    cursor = 0
+    for start, end, _ in matches:
+        pieces.append(text[cursor:start])
+        cursor = end
+    pieces.append(text[cursor:])
+    content = "".join(pieces).strip()
     if "<tool_call>" in content or "</tool_call>" in content:
         raise ValueError("Unmatched Qwen tool-call tags")
     return content or None, calls
@@ -104,7 +135,7 @@ def qwen_messages(messages: list[dict]):
 
 def completed_tool_call(text: str) -> bool:
     """Return True once the model has finished its first tool-call block."""
-    return "</tool_call>" in text
+    return next(tool_call_blocks(text), None) is not None
 
 
 class StopAfterFirstToolCall:
@@ -164,7 +195,7 @@ class QwenBackend:
                 StopAfterFirstToolCall(self.tokenizer, tokens.shape[-1])
             ])
         with torch.inference_mode():
-            output = self.model.generate(tokens, **kwargs)
+            output = self.model.generate(tokens, attention_mask=torch.ones_like(tokens), **kwargs)
         generated = output[0, tokens.shape[-1]:]
         return (
             self.tokenizer.decode(generated, skip_special_tokens=False).split("<|im_end|>")[0],
@@ -210,29 +241,36 @@ def create_app(backend=None, model_id: str | None = None):
         ):
             raise HTTPException(status_code=400, detail="Invalid tool definitions")
         try:
-            text, prompt_tokens, completion_tokens = runner.generate(
-                [message.model_dump(exclude_none=True) for message in request.messages],
-                request.max_tokens,
-                request.temperature,
-                allowed_tools,
-            )
-            try:
-                content, tool_calls = parse_qwen_tool_calls(text)
-            except ValueError as exc:
-                # Do not log raw model output unless explicitly requested.
-                if os.getenv("AGENT_DEBUG_OUTPUT") == "1":
-                    logger.warning("Rejected Qwen output (first 600 chars): %r", text[:600])
-                truncated = completion_tokens >= request.max_tokens
-                raise HTTPException(
-                    status_code=502,
-                    detail=(
-                        f"{exc}; completion_tokens={completion_tokens}; "
+            messages = [message.model_dump(exclude_none=True) for message in request.messages]
+            prompt_tokens = completion_tokens = 0
+            for attempt in range(2):
+                text, used_prompt, used_completion = runner.generate(
+                    messages, request.max_tokens, request.temperature, allowed_tools,
+                )
+                prompt_tokens += used_prompt
+                completion_tokens += used_completion
+                try:
+                    content, tool_calls = parse_qwen_tool_calls(text)
+                    break
+                except ValueError as exc:
+                    if allowed_tools and attempt == 0:
+                        # Regenerate, never repair or execute partial JSON. Keep raw
+                        # malformed output out of history and diagnostic responses.
+                        messages = messages + [{"role": "user", "content": (
+                            "Your previous response had invalid or incomplete tool JSON. "
+                            "Return one short <tool_call> JSON object </tool_call>. "
+                            "Use exactly name and arguments, with schema field names. "
+                            "Escape newlines and quotes inside strings. Keep content concise."
+                        )}]
+                        continue
+                    if os.getenv("AGENT_DEBUG_OUTPUT") == "1":
+                        logger.warning("Rejected Qwen output (first 600 chars): %r", text[:600])
+                    raise HTTPException(status_code=502, detail=(
+                        f"{exc}; completion_tokens={used_completion}; "
                         f"max_tokens={request.max_tokens}; "
-                        f"generation_limit_reached={truncated}. "
-                        "Enable AGENT_DEBUG_OUTPUT=1 on the server for a limited "
-                        "raw model-output snippet."
-                    ),
-                ) from exc
+                        f"generation_limit_reached={used_completion >= request.max_tokens}. "
+                        "Enable AGENT_DEBUG_OUTPUT=1 for raw output diagnostics."
+                    )) from exc
         except ValueError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         if tool_calls and not allowed_tools:

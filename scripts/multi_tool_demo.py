@@ -18,8 +18,8 @@ from rag.tools import register_rag_tools
 DEFAULT_OUTPUT = "citation_report.md"
 DEFAULT_TASK = (
     "First call search_knowledge to find the citation policy in the knowledge base. "
-    "Then call write_file to save a short Markdown report to citation_report.md. "
-    "Include the retrieved citation rule and the exact source_id. "
+    "Then call write_file with path=\"citation_report.md\" and content containing a short Markdown report. "
+    "Include the retrieved citation rule and the exact source_id in square brackets. Keep content under 100 words. "
     "Do not invent sources. Finally tell me which file was saved."
 )
 
