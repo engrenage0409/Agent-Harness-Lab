@@ -12,7 +12,7 @@ class RunResult:
 
 class AgentRuntime:
     def __init__(self,provider,registry,max_steps=8,trace_path=None,checkpoints=None,
-                 completion_check=None):
+                 completion_check=None,stop_check=None):
         if max_steps<1: raise ValueError("max_steps must be positive")
         self.provider=provider
         self.registry=registry
@@ -20,6 +20,7 @@ class AgentRuntime:
         self.trace=TraceWriter(trace_path)
         self.checkpoints=checkpoints
         self.completion_check=completion_check
+        self.stop_check=stop_check
     def run(self,task,system="Use tools when useful. Cite retrieved sources using [source_id].",
             session_id=None,resume=False):
         if resume and (not session_id or self.checkpoints is None):
@@ -45,6 +46,12 @@ class AgentRuntime:
         persist("running")
         self.trace.emit("run_started",task=task,resume=resume,max_steps=self.max_steps)
         while True:
+            if self.stop_check:
+                stop_reason=self.stop_check()
+                if stop_reason:
+                    persist(stop_reason)
+                    self.trace.emit("run_finished",status=stop_reason,steps=step)
+                    return RunResult("",step,messages,stop_reason)
             if pending:
                 # A crash DURING a side-effecting tool is ambiguous: operator approval required.
                 if pending[0].get("in_flight"):
