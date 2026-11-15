@@ -280,8 +280,8 @@ The final learning increment adds:
 Offline regression tests (no model service needed):
 
 ```powershell
-git switch feat/coding-agent-feedback-loop
-git pull --ff-only origin feat/coding-agent-feedback-loop
+git switch main
+git pull --ff-only origin main
 python -m pytest -q
 ```
 
@@ -306,4 +306,55 @@ crash-persistent recovery mechanism. It does not detect every concurrent-write
 race, and the file path restriction is not an OS sandbox. Inspect and trust
 the generated code before executing pytest; use isolation for untrusted code.
 
-Full walkthrough: [Calculator repair](docs/coding-repair.md).
+Full walkthrough, observed v1–v4 experiments, failure analysis, exact verification and trace inspection: [Coding Agent experiment log](docs/coding-repair.md).
+
+## Live Coding Agent experiments (v1–v4)
+
+Four successive local trials were used to diagnose **model reasoning vs. tool-protocol vs. exact-edit failures**. The table records the operator's reported observations; these runs were **not** a repeated-sample benchmark. The `runs/*.jsonl` traces and `workspace/calculator.py` were local artifacts and are not bundled as reproducible outputs in this repository.
+
+| Trial | Model | Observed result | Finding → engineering response |
+|---|---|---|---|
+| v1 | Qwen2.5-0.5B-Instruct | Incomplete; no successful edit; step budget exhausted | Model used pytest assertion text as if it were source and attempted a nonmatching patch without reading actual code → introduced a more explicit test/read/edit/verify tool sequence. |
+| v2 | Local Qwen repair experiment (later switched to Qwen3-VL-2B) | Server HTTP 502 for an unknown/unadvertised tool name | The serving layer rejected the model's tool name before Harness could return structured feedback → route well-formed calls to ToolRegistry for allowed-tool checks; malformed tool JSON still fails. |
+| v3 | Qwen3-VL-2B-Instruct | `max_steps_exceeded` at 10 steps; zero successful edits | Model identified the intended `add` fix, but submitted a whole-file `old_text` whose newline/indentation representation failed literal matching → clarified exact-edit instructions, minimal unique snippets and error diagnostics. |
+| v4 | Qwen3-VL-2B-Instruct | **`completed`, 5 model steps, 1 successful edit, `verified=true`, `last_test_passed=true`** | A constrained test → read → edit → test loop succeeded; evidence gate required an initial failing test and a fresh passing test after the edit. |
+
+**Interpretation:** v1–v4 are iterative debugging observations, **not** a controlled model ablation or measured success rate. The v4 final summary establishes a passing outcome for the fixed calculator tests, not general coding reliability. The precise v2 model/configuration and exact v4 patch arguments should be recovered from the corresponding local traces rather than inferred.
+
+### Reproduce and inspect
+
+Use only your own, inspected `workspace/calculator.py`; pytest imports and runs this file. With a deliberate bug in `add`, start the cached `Qwen/Qwen3-VL-2B-Instruct` server and run the approved client:
+
+```powershell
+git switch main
+git pull --ff-only origin main
+python -m pip install -e ".[serve,test]"
+python -m pytest -q
+
+# Terminal 1: model weights must already be cached locally
+$env:AGENT_MODEL="Qwen/Qwen3-VL-2B-Instruct"
+python -m uvicorn serving.app:app --host 127.0.0.1 --port 8000
+
+# Terminal 2:
+$env:AGENT_BASE_URL="http://127.0.0.1:8000/v1"
+$env:AGENT_MODEL="Qwen/Qwen3-VL-2B-Instruct"
+python -m scripts.coding_repair_demo --approve --trace runs/coding_repair_final.jsonl
+```
+
+Inspect actual model/tool decisions (PowerShell):
+
+```powershell
+Get-Content runs/coding_repair_final.jsonl |
+  ConvertFrom-Json |
+  Where-Object { $_.event -in @("assistant","tool_result","tool_error","completion_rejected","run_finished") } |
+  Select-Object step,event,name,arguments,result,content,status |
+  Format-List
+```
+
+For the new recovery safeguards without running the model or trusted workspace code:
+
+```powershell
+python -m pytest -v tests/test_recovery.py
+```
+
+See [the detailed experiment log](docs/coding-repair.md) for failure signatures, causal hypotheses, repair-stage constraints, results, and limitations.
