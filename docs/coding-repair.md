@@ -6,8 +6,8 @@ read_file and edit_file; it adds a fixed `run_tests` tool and a success gate.
 
 ## What is new?
 
-- `coding/repair.py`: `RepairTools` exposes only `read_file`,
-  `edit_file` and `run_tests`. Read/edit requests can address **only**
+- `coding/repair.py`: `RepairTools` registers `read_file`,
+  `edit_file` and `run_tests`, but exposes **only the tool permitted in the current phase** (`run_tests → read_file → edit_file → run_tests`). A failed edit sends it back to `read_file`; attempts to skip phases are rejected even if the model sends an unadvertised tool call. Read/edit requests can address **only**
   `workspace/calculator.py`. The model cannot choose a shell command or
   a test filename.
 - `run_tests` executes only the committed
@@ -44,7 +44,10 @@ read_file and edit_file; it adds a fixed `run_tests` tool and a success gate.
 
    Review `runs/coding_repair.jsonl` and the changed calculator file.
    A small 0.5B model may fail to choose tools correctly, exhaust the step
-   budget, or generate a bad patch. This is part of the experiment.
+   budget, or generate a bad patch. This is part of the experiment. The gate
+   cannot force the LLM to reason correctly. Its purpose is to prevent a blind
+   patch before inspecting source, and make unsuccessful edits require a fresh
+   read. The test runner and workspace are not a hardened sandbox.
 
 To run just offline tests (no Qwen, no generated-code execution):
 
