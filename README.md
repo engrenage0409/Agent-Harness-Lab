@@ -358,3 +358,71 @@ python -m pytest -v tests/test_recovery.py
 ```
 
 See [the detailed experiment log](docs/coding-repair.md) for failure signatures, causal hypotheses, repair-stage constraints, results, and limitations.
+
+
+## Optional Milvus Lite Hybrid RAG experiment
+
+The original `RAGStore` already provides Markdown/TXT chunking, BM25, optional
+in-memory dense embeddings, RRF fusion, optional reranking, and stable
+`source_id` citations. This experiment **adds Milvus as an optional dense vector
+backend** without changing the `search_knowledge` tool contract or evidence-first
+citation validation. It does not yet add PDF/Word ingestion or native Milvus BM25.
+
+Install the additional dependencies (the embedding model downloads on first use):
+
+```powershell
+python -m pip install -e ".[milvus,test]"
+```
+
+Compare the default, existing BM25 search with Milvus + BM25/RRF on the same
+documents and query:
+
+```powershell
+python -m scripts.rag_search "citation policy"
+python -m scripts.rag_search "citation policy" --backend milvus
+python -m scripts.rag_search "citation policy" --backend milvus --rerank
+python -m pytest -q
+```
+
+Use `--docs my_documents` to supply UTF-8 Markdown/TXT files, or
+`--model-name sentence-transformers/all-MiniLM-L6-v2` to match the earlier
+English-oriented dense baseline. By default Milvus uses a multilingual
+sentence-transformers model; comparisons require using the same model if you
+want to isolate the storage-backend effect.
+
+This demo stores its Milvus Lite data at `runs/rag_milvus.db` and **drops and
+rebuilds only its dedicated `agent_harness_rag` collection on every RAGStore
+initialization**. Do not use a collection containing data you wish to preserve.
+The current code is a small-dataset integration demonstration, not an
+incremental ingestion pipeline or vector-database performance benchmark.
+Milvus Lite may hold a single-process lock on its database directory, and
+`RAGStore.close()` releases its client.
+
+`RAGStore(..., backend="milvus")` can also be passed to the existing
+`register_rag_tools(registry, store)`; the tool result keeps
+`source_id`, `source`, `text`, and `score`. The `score` for
+hybrid results is an RRF fusion score, **not** a cosine similarity or a
+factual-confidence estimate.
+
+
+### Markdown chunking and weighted RRF
+
+Markdown documents use section-aware chunking: headings are carried into
+retrieved passages as context, paragraphs are preferred over raw character
+cuts, and oversized paragraphs fall back to word boundaries when possible.
+Plain `.txt` files keep the legacy character-based splitter. Existing citation
+IDs retain the `filename#chunk-N` shape, but **chunk numbers may change**
+after reindexing; rebuild any external citation indexes that refer to older IDs.
+
+The default RRF is unchanged (BM25:Dense = 1:1). Compare different
+weights using the existing Milvus debug command:
+
+```powershell
+python -m scripts.compare_retrieval "successful repair verification" --docs docs -k 5 --bm25-weight 1 --dense-weight 1
+python -m scripts.compare_retrieval "successful repair verification" --docs docs -k 5 --bm25-weight 2 --dense-weight 1
+```
+
+The main RAG CLI also accepts `--bm25-weight` and `--dense-weight` when
+a dense backend is enabled. Weights must be finite, nonnegative and not both
+zero. Scores from different weight settings have different scales; compare
+rankings and annotated relevance rather than raw RRF magnitudes.

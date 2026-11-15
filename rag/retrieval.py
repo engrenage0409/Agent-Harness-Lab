@@ -54,18 +54,41 @@ class DenseIndex:
         order=sorted(range(len(scores)),key=lambda i:(-float(scores[i]),i))[:k]
         return [(self.passages[i],float(scores[i])) for i in order]
 
+def weighted_rrf(rankings, weights=(1.0, 1.0), constant=60):
+    """Combine ranked Passage lists with weighted reciprocal-rank fusion."""
+    if len(rankings) != len(weights):
+        raise ValueError("rankings and weights must have the same length")
+    if any(not math.isfinite(w) or w < 0 for w in weights) or not any(weights):
+        raise ValueError("RRF weights must be finite, nonnegative and not both zero")
+    scores, passages = {}, {}
+    for ranking, weight in zip(rankings, weights):
+        if weight == 0:
+            continue
+        for rank, (passage, _) in enumerate(ranking, 1):
+            scores[passage.source_id] = scores.get(passage.source_id, 0) + weight / (constant + rank)
+            passages[passage.source_id] = passage
+    return [(passages[sid], round(score, 6))
+            for sid, score in sorted(scores.items(), key=lambda item: (-item[1], item[0]))]
+
+
 class HybridRetriever:
-    def __init__(self,passages,dense=False):
+    def __init__(self,passages,dense=False,backend="local",milvus_uri="runs/rag_milvus.db",model_name=None,bm25_weight=1.0,dense_weight=1.0):
+        if backend not in ("local", "milvus"):
+            raise ValueError("backend must be 'local' or 'milvus'")
+        self.weights=(float(bm25_weight),float(dense_weight))
+        if any(not math.isfinite(w) or w < 0 for w in self.weights) or not any(self.weights):
+            raise ValueError("RRF weights must be finite, nonnegative and not both zero")
         self.sparse=BM25Index(passages)
-        self.dense=DenseIndex(passages) if dense else None
+        self.dense=None
+        if backend == "milvus":
+            from .milvus_backend import MilvusDenseIndex
+            kwargs={"uri":milvus_uri}
+            if model_name: kwargs["model_name"]=model_name
+            self.dense=MilvusDenseIndex(passages,**kwargs)
+        elif dense:
+            kwargs={"model_name":model_name} if model_name else {}
+            self.dense=DenseIndex(passages,**kwargs)
     def search(self,query,k=5):
         if not self.dense: return self.sparse.search(query,k)
         lists=[self.sparse.search(query,max(20,k)),self.dense.search(query,max(20,k))]
-        scores={}
-        items={}
-        for ranking in lists:
-            for rank,(passage,_) in enumerate(ranking,1):
-                scores[passage.source_id]=scores.get(passage.source_id,0)+1/(60+rank)
-                items[passage.source_id]=passage
-        return [(items[id],round(score,6)) for id,score in
-                sorted(scores.items(),key=lambda x:(-x[1],x[0]))[:k]]
+        return weighted_rrf(lists, self.weights)[:k]

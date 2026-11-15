@@ -1,22 +1,25 @@
 """Local document store, optional dense embeddings and optional CrossEncoder reranking."""
 import json
 from pathlib import Path
-from .chunking import chunk_text,load_documents
+from .chunking import chunk_text,chunk_markdown,load_documents
 from .retrieval import Passage,HybridRetriever
 
 def build_passages(document_dir,chunk_size=500,overlap=80):
     passages=[]
     for doc in load_documents(document_dir):
-        for i,text in enumerate(chunk_text(doc["text"],chunk_size,overlap)):
+        splitter=chunk_markdown if doc["source"].lower().endswith(".md") else chunk_text
+        for i,text in enumerate(splitter(doc["text"],chunk_size,overlap)):
             passages.append(Passage(source_id=f"{doc['source']}#chunk-{i}",
                                     source=doc["source"],text=text))
     return passages
 
 class RAGStore:
     def __init__(self,document_dir,dense=False,chunk_size=500,overlap=80,
-                 rerank=False,rerank_candidates=20):
+                 rerank=False,rerank_candidates=20,backend="local",milvus_uri="runs/rag_milvus.db",model_name=None,bm25_weight=1.0,dense_weight=1.0):
         self.passages=build_passages(document_dir,chunk_size,overlap)
-        self.retriever=HybridRetriever(self.passages,dense=dense)
+        self.retriever=HybridRetriever(self.passages,dense=dense,backend=backend,
+                                         milvus_uri=milvus_uri,model_name=model_name,
+                                         bm25_weight=bm25_weight,dense_weight=dense_weight)
         self.rerank_candidates=rerank_candidates
         if rerank:
             from .rerank import CrossEncoderReranker
@@ -28,6 +31,11 @@ class RAGStore:
         hits=self.reranker.rerank(question,candidates,k) if self.reranker else candidates[:k]
         return [{"source_id":p.source_id,"source":p.source,
                  "score":score,"text":p.text} for p,score in hits]
+    def close(self):
+        if self.retriever.dense is not None:
+            close=getattr(self.retriever.dense,"close",None)
+            if close: close()
+
     def save_chunks(self,out):
         path=Path(out);path.parent.mkdir(parents=True,exist_ok=True)
         path.write_text(json.dumps([p.__dict__ for p in self.passages],
