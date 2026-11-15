@@ -271,7 +271,6 @@ def create_app(backend=None, model_id: str | None = None):
                         f"generation_limit_reached={used_completion >= request.max_tokens}. "
                         "Enable AGENT_DEBUG_OUTPUT=1 for raw output diagnostics."
                     )) from exc
-
         except ValueError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         if tool_calls and not allowed_tools:

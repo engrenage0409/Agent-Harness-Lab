@@ -109,3 +109,70 @@ def test_completion_check_respects_max_steps():
     ).run("Create output")
     assert result.status == "max_steps_exceeded"
     assert result.steps == 2
+
+
+def test_retry_safe_read_only_tool_recovers_transient_failure(tmp_path):
+    calls = []
+    def flaky():
+        calls.append(1)
+        if len(calls) == 1:
+            raise TimeoutError("temporary")
+        return {"ok": True}
+    registry = ToolRegistry().add(Tool(
+        "lookup", "Read-only lookup",
+        {"type": "object", "properties": {}}, flaky,
+        retry_safe=True, max_transient_retries=1,
+    ))
+    scripted = ScriptedProvider([
+        {"role": "assistant", "tool_calls": [{
+            "id": "c1", "type": "function",
+            "function": {"name": "lookup", "arguments": "{}"}}]},
+        {"role": "assistant", "content": "retrieved"},
+    ])
+    path = tmp_path / "recovery.jsonl"
+    result = AgentRuntime(scripted, registry, trace_path=path).run("lookup")
+    assert result.status == "completed"
+    assert len(calls) == 2
+    assert result.messages[-2]["content"] == '{"ok": true}'
+    assert '"event": "tool_retry"' in path.read_text(encoding="utf-8")
+
+
+def test_non_idempotent_tool_is_never_retried():
+    attempts = []
+    def unstable_write():
+        attempts.append(1)
+        raise TimeoutError("unknown whether commit succeeded")
+    registry = ToolRegistry().add(Tool(
+        "write_file", "Side-effecting operation",
+        {"type": "object", "properties": {}}, unstable_write,
+    ))
+    failure = registry.execute("write_file", {})
+    assert failure["error_category"] == "transient_error"
+    assert failure["retry_safe"] is False
+    assert failure["attempts"] == 1
+    assert len(attempts) == 1
+
+
+def test_invalid_arguments_are_returned_without_execution(tmp_path):
+    calls = []
+    registry = ToolRegistry().add(Tool(
+        "read_file", "Read a file",
+        {"type": "object", "properties": {"path": {"type": "string"}},
+         "required": ["path"], "additionalProperties": False},
+        lambda path: calls.append(path) or path,
+    ))
+    scripted = ScriptedProvider([
+        {"role": "assistant", "tool_calls": [{
+            "id": "bad", "type": "function",
+            "function": {"name": "read_file", "arguments": '{"file_name":"a.txt"}'}}]},
+        {"role": "assistant", "tool_calls": [{
+            "id": "fixed", "type": "function",
+            "function": {"name": "read_file", "arguments": '{"path":"a.txt"}'}}]},
+        {"role": "assistant", "content": "done"},
+    ])
+    trace = tmp_path / "errors.jsonl"
+    result = AgentRuntime(scripted, registry, trace_path=trace).run("Read a.txt")
+    assert result.status == "completed"
+    assert calls == ["a.txt"]
+    assert '"error_category": "invalid_arguments"' in result.messages[3]["content"]
+    assert '"event": "tool_error"' in trace.read_text(encoding="utf-8")

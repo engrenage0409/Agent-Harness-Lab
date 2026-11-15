@@ -5,6 +5,7 @@ Use --live for real Qwen planning over the same registered tools.
 """
 import argparse
 import json
+import re
 from pathlib import Path
 
 from coding.sandbox import register_coding_tools
@@ -50,6 +51,7 @@ class EvidenceFirstRegistry(ToolRegistry):
         ]
 
     def execute(self, name, arguments):
+        self.last_events = []
         if name not in self.exposed:
             return {"error": "Tool is not allowed in this phase. Read the previous tool results before making another call."}
         if name == "write_file":
@@ -58,10 +60,9 @@ class EvidenceFirstRegistry(ToolRegistry):
             if arguments.get("path") != DEFAULT_OUTPUT:
                 return {"error": f"Only {DEFAULT_OUTPUT} is allowed in this demo"}
             content = arguments.get("content")
-            if not isinstance(content, str) or not any(
-                f"[{source_id}]" in content for source_id in self.source_ids
-            ):
-                return {"error": "Report must cite an actual source_id returned by search_knowledge"}
+            citations = set(re.findall(r"\[([^\]\n]+#chunk-\d+)\]", content)) if isinstance(content, str) else set()
+            if not citations or not citations.issubset(self.source_ids):
+                return {"error": "Report must cite only source_ids returned by search_knowledge"}
         result = super().execute(name, arguments)
         if name == "search_knowledge" and isinstance(result, list) and result:
             self.source_ids = {
@@ -177,7 +178,8 @@ def run_demo(*, live=False, docs="examples/knowledge", workspace="workspace",
         and write_observed
         and observed.index("search_knowledge") < observed.index("write_file")
         and result.steps >= 3
-        and "[policy.md#chunk-0]" in report
+        and bool(set(re.findall(r"\[([^\]\n]+#chunk-\d+)\]", report)))
+        and set(re.findall(r"\[([^\]\n]+#chunk-\d+)\]", report)).issubset(registry.source_ids)
     ) if "search_knowledge" in observed and "write_file" in observed else False
     return {
         "status": result.status,
