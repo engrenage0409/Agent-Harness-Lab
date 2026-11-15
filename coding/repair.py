@@ -91,9 +91,14 @@ class RepairTools(ToolRegistry):
                 f"Tool {name} is not allowed in phase {self.phase}. "
                 f"Allowed: {sorted(self.exposed)}. Follow the next tool phase.",
                 "workflow_violation",
+                tool_name=name, phase=self.phase, allowed_tools=sorted(self.exposed),
             )
         # ToolRegistry handles schema validation and returns structured errors.
+        previous_phase = self.phase
         result = super().execute(name, arguments)
+        if self.phase != previous_phase:
+            # No further call in this reply may reuse the previous phase.
+            self.exposed = set()
         if name == "edit_file" and isinstance(result, dict) and "error" in result:
             # A bad patch must not be repeated without rereading the source.
             self.phase = "read"

@@ -67,7 +67,7 @@ class AgentRuntime:
                     self.trace.emit("tool_error", step=step, name=name,
                                     category=observation.get("error_category", "tool_error"),
                                     error=observation["error"])
-                messages.append({"role":"tool","tool_call_id":call.get("id","unknown"),
+                messages.append({"role":"tool","name":name,"tool_call_id":call.get("id","unknown"),
                                  "content":json.dumps(observation,ensure_ascii=False,default=str)})
                 pending.pop(0)
                 persist("running")

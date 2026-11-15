@@ -156,3 +156,66 @@ def test_same_turn_tool_chaining_cannot_skip_read(tmp_path):
         "path": "calculator.py"
     })["error_category"] == "workflow_violation"
     assert registry.definitions()[0]["function"]["name"] == "read_file"
+
+
+def test_http_illegal_tool_feedback_then_repair(tmp_path):
+    import pytest
+    pytest.importorskip('fastapi')
+    pytest.importorskip('httpx')
+    from fastapi.testclient import TestClient
+    from serving.app import create_app
+
+    target = tmp_path / 'calculator.py'
+    target.write_text('def add(a, b): return a - b')
+    executions = []
+    def tests():
+        executions.append(1)
+        return {'exit_code': 0 if 'a + b' in target.read_text() else 1}
+    registry = RepairTools(tmp_path, tests)
+    outputs = iter([
+        ('edit_file', {'path': 'calculator.py', 'old_text': 'a - b', 'new_text': 'BAD'}),
+        ('unknown_tool', {}),
+        ('run_tests', {}),
+        ('read_file', {'path': 'calculator.py'}),
+        ('edit_file', {'path': 'calculator.py', 'old_text': 'a - b', 'new_text': 'a + b'}),
+        ('run_tests', {}),
+        None,
+    ])
+    class Backend:
+        def load(self): pass
+        def generate(self, messages, *args):
+            item = next(outputs)
+            if item is None:
+                return 'Fixed', 1, 1
+            name, arguments = item
+            return '<tool_call>' + json.dumps({'name': name, 'arguments': arguments}) + '</tool_call>', 1, 1
+    with TestClient(create_app(Backend(), model_id='test')) as client:
+        class Provider:
+            def complete(self, messages, tools):
+                response = client.post('/v1/chat/completions', json={
+                    'model': 'test', 'messages': messages, 'tools': tools,
+                })
+                assert response.status_code == 200, response.text
+                return response.json()['choices'][0]['message']
+        result = AgentRuntime(Provider(), registry, max_steps=8,
+                              completion_check=registry.completion_feedback).run('Repair')
+    assert result.status == 'completed'
+    observations = [m for m in result.messages if m['role'] == 'tool']
+    for observation in observations[:2]:
+        error = json.loads(observation['content'])
+        assert error['error_category'] == 'workflow_violation'
+        assert error['allowed_tools'] == ['run_tests']
+        assert error['phase'] == 'test'
+        assert observation['tool_call_id']
+    assert executions == [1, 1]
+    assert registry.successful_edits == 1
+    assert 'a + b' in target.read_text()
+
+
+def test_phase_change_revokes_same_turn_permission(tmp_path):
+    runs = []
+    registry = RepairTools(tmp_path, lambda: runs.append(1) or {'exit_code': 1})
+    registry.definitions()
+    registry.execute('run_tests', {})
+    assert registry.execute('run_tests', {})['error_category'] == 'workflow_violation'
+    assert runs == [1]

@@ -83,7 +83,7 @@ def test_malformed_tool_call_fails_closed():
         parse_qwen_tool_calls('<tool_call>{"name":"bad","arguments":{oops}}</tool_call>')
 
 
-def test_unknown_tool_call_is_rejected():
+def test_unknown_tool_call_is_forwarded_for_runtime_feedback():
     backend = FakeBackend()
     backend.next_output = '<tool_call>{"name":"unknown","arguments":{}}</tool_call>'
     with TestClient(create_app(backend, model_id="test-qwen")) as client:
@@ -92,7 +92,10 @@ def test_unknown_tool_call_is_rejected():
             "messages": [{"role": "user", "content": "Calculate"}],
             "tools": [{"type": "function", "function": {"name": "calculator"}}],
         })
-        assert response.status_code == 502
+        assert response.status_code == 200
+        call = response.json()["choices"][0]["message"]["tool_calls"][0]
+        assert call["function"]["name"] == "unknown"
+        assert call["id"]
 
 
 
@@ -179,3 +182,17 @@ def test_malformed_output_retries_once_then_succeeds():
 def test_incomplete_second_call_is_not_silently_executed():
     with pytest.raises(ValueError):
         parse_qwen_tool_calls('<tool_call>{"name":"search","arguments":{}}</tool_call><tool_call>{')
+
+
+@pytest.mark.parametrize('tools,choice', [([], 'auto'), (None, 'none')])
+def test_unrequested_call_is_forwarded_without_execution(tools, choice):
+    backend = FakeBackend()
+    backend.next_output = '<tool_call>{"name":"run_tests","arguments":{}}</tool_call>'
+    with TestClient(create_app(backend, model_id='test')) as client:
+        response = client.post('/v1/chat/completions', json={
+            'model': 'test', 'messages': [{'role': 'user', 'content': 'Done'}],
+            'tools': tools, 'tool_choice': choice,
+        })
+    assert response.status_code == 200
+    assert response.json()['choices'][0]['message']['tool_calls'][0]['function']['name'] == 'run_tests'
+    assert not backend.calls[0][3]

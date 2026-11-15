@@ -273,12 +273,9 @@ def create_app(backend=None, model_id: str | None = None):
                     )) from exc
         except ValueError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
-        if tool_calls and not allowed_tools:
-            raise HTTPException(status_code=502, detail="Model emitted unrequested tool calls")
-        if tool_calls:
-            known = {tool["function"].get("name") for tool in allowed_tools}
-            if any(call["function"]["name"] not in known for call in tool_calls):
-                raise HTTPException(status_code=502, detail="Model emitted unknown tool name")
+        # Parsing validates the wire format, not execution permissions. A model
+        # may select a tool hidden in this phase; preserve its call ID so the
+        # runtime registry can deny it and return a correlated tool observation.
         return {
             "id": "chatcmpl-" + uuid.uuid4().hex,
             "object": "chat.completion",
