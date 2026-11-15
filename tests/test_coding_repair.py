@@ -238,3 +238,55 @@ def test_stage_guidance_does_not_supply_the_patch(tmp_path):
     registry.phase = 'edit'
     assert 'old_text' in registry.completion_feedback([])
     assert 'a + b' not in registry.next_action()
+
+
+def test_failed_multiline_edit_diagnostics_and_recovery(tmp_path):
+    source = 'def first():\n    return 1\ndef second():\n    return 1\n'
+    target = tmp_path / 'calculator.py'
+    target.write_bytes(source.encode())
+    registry = RepairTools(tmp_path, lambda: {'exit_code': 1})
+    registry.definitions()
+    registry.execute('run_tests', {})
+    for bad, diagnostic in [
+        (source.replace('\n', r'\n'), 'literal backslash-n'),
+        (source.replace('    ', '  '), 'indentation'),
+        (source.replace('\n', ' '), 'line breaks'),
+        ('return 1', 'ambiguous'),
+    ]:
+        registry.definitions()
+        assert registry.execute('read_file', {'path': 'calculator.py'}) == source
+        registry.definitions()
+        result = registry.execute('edit_file', {
+            'path': 'calculator.py', 'old_text': bad, 'new_text': 'replacement'})
+        assert diagnostic in result['error']
+        assert 'No file was changed' in result['error']
+        assert 'read_file' in result['next_action']
+        assert target.read_bytes() == source.encode()
+        assert registry.successful_edits == 0
+        registry.definitions()
+        assert registry.execute('edit_file', {
+            'path': 'calculator.py', 'old_text': bad, 'new_text': 'replacement'
+        })['error_category'] == 'workflow_violation'
+    assert registry.execute('read_file', {'path': 'calculator.py'}) == source
+    registry.definitions()
+    assert registry.execute('edit_file', {
+        'path': 'calculator.py', 'old_text': 'def first():\n    return 1',
+        'new_text': 'def first():\n    return 2',
+    })['replacements'] == 1
+    assert target.read_text() == source.replace('return 1', 'return 2', 1)
+    assert registry.definitions()[0]['function']['name'] == 'run_tests'
+
+
+def test_shared_edit_guidance(tmp_path):
+    from coding.sandbox import EDIT_DESCRIPTION, register_coding_tools
+    from harness.contracts import ToolRegistry
+    general = ToolRegistry()
+    register_coding_tools(general, tmp_path)
+    repair = RepairTools(tmp_path, lambda: {'exit_code': 1})
+    repair.phase = 'edit'
+    for registry in (general, repair):
+        edit = next(d['function'] for d in registry.definitions()
+                    if d['function']['name'] == 'edit_file')
+        assert edit['description'] == EDIT_DESCRIPTION
+    assert 'Do not replace the whole file' in repair.next_action()
+    assert 'smallest unique exact source snippet' in repair.next_action()

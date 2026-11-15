@@ -58,3 +58,23 @@ python -m pytest -q tests/test_coding_repair.py
 **Safety:** Do not use this with untrusted code or sensitive files. For a
 general-purpose Coding Agent, isolate the code in a disposable container/VM,
 restrict file and network permissions, and require explicit user consent.
+
+## Exact-edit recovery
+
+Both tool registries request one line or the smallest unique exact source
+snippet, never a whole-file replacement. Matching remains literal; there is
+no fuzzy substitution or automatic unescaping. Missing matches get whitespace
+and newline diagnostics; ambiguous matches request minimal adjacent context.
+Edit errors return a next_action to reread the allowed source before retrying.
+
+With the existing Qwen3-VL-2B server running, rerun from the repository root
+(use the model ID configured by your server):
+
+```powershell
+$env:AGENT_BASE_URL="http://127.0.0.1:8000/v1"
+$env:AGENT_MODEL="Qwen/Qwen3-VL-2B-Instruct"
+python -m scripts.coding_repair_demo --approve --max-steps 16 --trace runs/coding_repair_exact_edit.jsonl
+```
+
+Inspect/trust the workspace first and ensure it contains the intended bug.
+Offline regressions do not establish that a real model will complete repair.

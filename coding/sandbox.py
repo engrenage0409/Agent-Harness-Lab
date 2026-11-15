@@ -4,6 +4,16 @@ import os
 import tempfile
 from harness.contracts import Tool,ToolRegistry
 
+EDIT_DESCRIPTION = (
+    "Replace exactly one literal occurrence in an existing UTF-8 workspace file. "
+    "Copy one line or the smallest unique exact source snippet from read_file into old_text. "
+    "Do not replace the whole file. Preserve spaces and indentation exactly; "
+    "add only enough adjacent source context to make the match unique. "
+    "new_text replaces only that snippet. JSON-decode line breaks once: "
+    "do not send literal backslash-n characters in place of source newlines. "
+    "After failure, call read_file again before constructing a smaller exact edit."
+)
+
 class Workspace:
     def __init__(self,root):
         self.root=Path(root).resolve()
@@ -50,7 +60,21 @@ class Workspace:
             raise ValueError("new_text must differ from old_text")
         count = normalized.count(old_text)
         if count != 1:
-            raise ValueError(f"Expected exactly one match; found {count}")
+            diagnostic = (
+                "old_text does not match the source; check indentation, spaces and line breaks."
+                if count == 0 else
+                "old_text is ambiguous; include just enough adjacent source to make it unique."
+            )
+            if "\\n" in old_text:
+                diagnostic += (
+                    " old_text contains literal backslash-n characters; these do not match "
+                    "actual newlines. Use JSON newline escapes only once."
+                )
+            raise ValueError(
+                f"Expected exactly one match; found {count}. No file was changed. "
+                f"{diagnostic} Call read_file again, then copy one line or the smallest "
+                "unique exact source snippet. Do not replace the whole file."
+            )
         offsets = [i for i in range(len(content))
                    if not (i > 0 and content[i-1:i+1] == "\r\n")] + [len(content)]
         start = normalized.index(old_text)
@@ -94,7 +118,7 @@ def register_coding_tools(registry:ToolRegistry,root):
          {"path":{"type":"string"}},["path"],workspace.read)
     tool("write_file","Write UTF-8 workspace file; overwrites existing data. Use only with authorized tasks.",
          {"path":{"type":"string"},"content":{"type":"string"}},["path","content"],workspace.write)
-    tool("edit_file","Replace exactly one literal occurrence in an existing UTF-8 workspace file.",
+    tool("edit_file",EDIT_DESCRIPTION,
          {"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"}},
          ["path","old_text","new_text"],workspace.edit)
     return workspace

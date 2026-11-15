@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from coding.sandbox import Workspace
+from coding.sandbox import EDIT_DESCRIPTION, Workspace
 from harness.contracts import Tool, ToolRegistry
 
 TARGET = "calculator.py"
@@ -63,7 +63,7 @@ class RepairTools(ToolRegistry):
             self.read_file,
         ))
         self.add(Tool(
-            "edit_file", "Replace exactly one occurrence in calculator.py.",
+            "edit_file", EDIT_DESCRIPTION,
             {"type": "object", "properties": {
                 "path": {"type": "string"}, "old_text": {"type": "string"},
                 "new_text": {"type": "string"}},
@@ -110,6 +110,7 @@ class RepairTools(ToolRegistry):
             # A bad patch must not be repeated without rereading the source.
             self.phase = "read"
             self.exposed = set()
+            result["next_action"] = self.next_action()
         return result
 
     @staticmethod
@@ -151,11 +152,8 @@ class RepairTools(ToolRegistry):
         return {
             "test": 'Call run_tests with arguments {} now.',
             "read": 'Call read_file with arguments {"path":"calculator.py"} now.',
-            "edit": ('Call edit_file now with path="calculator.py", old_text copied exactly '
-                     'from the source returned by read_file, and new_text containing your fix. '
-                     'Change implementation only. Do not copy pytest output into the file. '
-                     'Use valid JSON strings with escaped line breaks. Include the function definition '
-                     'in old_text so the match is unique.'),
+            "edit": ('Call edit_file now with path="calculator.py". ' + EDIT_DESCRIPTION +
+                     ' Change implementation only. Do not copy pytest output into the file.'),
             "verify": 'Call run_tests with arguments {} now to verify your edit.',
             "done": 'Report the actual test outcome. Do not call more tools.',
         }[self.phase]
