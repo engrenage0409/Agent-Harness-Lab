@@ -33,15 +33,20 @@ def main():
         completion_check=tools.completion_feedback,
     )
     result = runtime.run(
-        "Repair calculator.py. First call run_tests to inspect a failing test. "
-        "Then read_file calculator.py, use edit_file to fix the bug, and call "
-        "run_tests again. Stop only after tests pass. You may not execute other "
-        "commands or modify other files.",
+        "Repair the implementation of calculator.py (never edit the tests). "
+        "First run_tests, then read_file to inspect the actual Python source. "
+        "The pytest assertion such as assert -1 == 5 is diagnostic output, "
+        "NOT a substring to edit in calculator.py. Use the exact source "
+        "expression returned by read_file as old_text for edit_file. "
+        "After a failed edit, read_file again before retrying. "
+        "Finally run_tests again and only finish if it passes.",
         system=(
             "You are a coding agent repairing a trusted local example. "
             "Call tools to inspect actual test feedback. Use only the "
             "provided read_file, edit_file and run_tests functions. "
-            "Never claim success without a fresh passing test result."
+            "Never claim success without a fresh passing test result. "
+            "Use available tools rather than describing future actions; "
+            "do not ask the user to provide code already accessible with read_file."
         ),
     )
     verified = tools.completion_feedback(result.messages) is None
