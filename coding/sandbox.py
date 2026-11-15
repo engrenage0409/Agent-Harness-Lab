@@ -66,7 +66,8 @@ class Workspace:
         if len(content)>100_000: raise ValueError("Content too large")
         p=self.resolve(path)
         p.parent.mkdir(parents=True,exist_ok=True)
-        p.write_text(content,encoding="utf-8")
+        with p.open("w", encoding="utf-8", newline="") as stream:
+            stream.write(content)
         return {"saved":p.relative_to(self.root).as_posix()}
 
 def register_coding_tools(registry:ToolRegistry,root):
