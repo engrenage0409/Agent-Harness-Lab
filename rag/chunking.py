@@ -39,9 +39,10 @@ def _split_large_block(block, budget, overlap):
         parts.append(piece)
         # Reuse only complete words and avoid repeating the entire piece.
         context = piece[-min(overlap, max(0, len(piece) // 3)):]
-        if context and len(context) < len(piece):
-            start = _safe_cut(context, len(context))
-            context = context[:start].lstrip()
+        # Drop a partial leading word from the overlap window.
+        if context and not context[0].isspace():
+            match = re.search(r"\\s+", context)
+            context = context[match.end():] if match else ""
         remaining = (context + " " if context else "") + remaining[cut:].lstrip()
     return parts
 
@@ -65,7 +66,7 @@ def chunk_markdown(text, size=500, overlap=80):
 
     def flush():
         nonlocal body
-        if body:
+        if any(line.strip() for line in body):
             sections.append((list(headings), "\n".join(body).strip()))
             body = []
 
