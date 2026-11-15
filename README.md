@@ -403,3 +403,26 @@ Milvus Lite may hold a single-process lock on its database directory, and
 `source_id`, `source`, `text`, and `score`. The `score` for
 hybrid results is an RRF fusion score, **not** a cosine similarity or a
 factual-confidence estimate.
+
+
+### Markdown chunking and weighted RRF
+
+Markdown documents use section-aware chunking: headings are carried into
+retrieved passages as context, paragraphs are preferred over raw character
+cuts, and oversized paragraphs fall back to word boundaries when possible.
+Plain `.txt` files keep the legacy character-based splitter. Existing citation
+IDs retain the `filename#chunk-N` shape, but **chunk numbers may change**
+after reindexing; rebuild any external citation indexes that refer to older IDs.
+
+The default RRF is unchanged (BM25:Dense = 1:1). Compare different
+weights using the existing Milvus debug command:
+
+```powershell
+python -m scripts.compare_retrieval "successful repair verification" --docs docs -k 5 --bm25-weight 1 --dense-weight 1
+python -m scripts.compare_retrieval "successful repair verification" --docs docs -k 5 --bm25-weight 2 --dense-weight 1
+```
+
+The main RAG CLI also accepts `--bm25-weight` and `--dense-weight` when
+a dense backend is enabled. Weights must be finite, nonnegative and not both
+zero. Scores from different weight settings have different scales; compare
+rankings and annotated relevance rather than raw RRF magnitudes.
