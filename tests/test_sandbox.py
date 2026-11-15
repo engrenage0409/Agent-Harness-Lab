@@ -70,3 +70,20 @@ def test_edit_tool_registry_and_schema(tmp_path):
     assert registry.execute("edit_file", {"path": "test.py", "old_text": "2"})[
         "error_category"
     ] == "invalid_arguments"
+
+
+def test_edit_read_roundtrip_preserves_crlf(tmp_path):
+    ws = Workspace(tmp_path)
+    target = tmp_path / 'code.py'
+    target.write_bytes(b'def add(a, b):\r\n    return a - b\r\n')
+    source = ws.read('code.py')
+    ws.edit('code.py', source, source.replace('a - b', 'a + b'))
+    assert target.read_bytes() == b'def add(a, b):\r\n    return a + b\r\n'
+
+
+def test_edit_mixed_newlines_keeps_unmodified_bytes(tmp_path):
+    ws = Workspace(tmp_path)
+    target = tmp_path / 'code.py'
+    target.write_bytes(b'first\r\nwrong\nlast\r\n')
+    ws.edit('code.py', '\nwrong\n', '\nright\n')
+    assert target.read_bytes() == b'first\nright\nlast\r\n'

@@ -2,14 +2,14 @@
 
 A compact, inspectable Python implementation of an **agent runtime, persistent memory, resumable tool loop, sequential multi-agent orchestration and local retrieval-augmented generation pipeline**. Designed as a learning scaffold for coding agents and industrial-document workflows.
 
-**Status:** implementation scaffold, unit tests and offline demonstration provided. No live-provider evaluation or industrial integration has been executed yet. No claim of production sandbox security.
+**Status:** educational MVP with offline tests and an operator-reported live Qwen3-VL-2B calculator repair run (`completed`, 5 model steps, 1 edit, verified). This is a narrow, local demonstration—not a production-grade coding sandbox, general-purpose repository agent, or industrial deployment.
 
 ## What's inside
 
 | Module | Implemented capability |
 |---|---|
 | `harness/` | bounded model/tool execution loop, tool registry, JSONL traces, SQLite memory, JSON checkpoints/resume, sequential multi-agent orchestrator, scripted and OpenAI-compatible providers |
-| `coding/` | workspace file list/read/write; optional manually approved pytest runner (not registered as model tool) |
+| `coding/` | scoped workspace list/read/write/edit; separately approved fixed calculator pytest tool; repeat-failure detector, file diff and opt-in rollback |
 | `rag/` | Markdown/TXT ingestion, overlapping chunking, BM25, optional dense/hybrid RRF, optional CrossEncoder reranking; labeled Recall@K/MRR/nDCG/HitRate evaluation |
 | `scripts/` | offline agent demonstration, standalone knowledge-base search |
 | `tests/` | retrieval, sandbox, tool loop tests |
@@ -91,7 +91,7 @@ small FastAPI service. **No Ollama or model re-download is required.** It loads
 weights locally at server startup and serves `/health`, `/v1/models`, and
 `/v1/chat/completions`. The server supports Qwen2.5 Hermes-style `<tool_call>` parsing and tool-result
 history for the existing live AgentRuntime. Streaming is not implemented.
-Malformed or unknown tool calls fail explicitly. Actual tool execution,
+Malformed tool-call JSON fails explicitly; unknown tool names are forwarded for runtime rejection and structured feedback (not executed). Actual tool execution,
 argument checks and trace logging are handled by the Harness, not the server.
 
 In Windows PowerShell:
@@ -258,3 +258,52 @@ More detailed tradeoffs: [Phase 2 design and limitations](docs/phase2.md).
 - Industrial adaptation: reuse rules/DSL and evidence schema *without uploading confidential datasets or proprietary code*.
 
 See [docs/reading-list.md](docs/reading-list.md).
+
+
+## Coding Agent MVP — verified repair and bounded recovery
+
+This prototype is **not Codex**. It fixes a trusted local `workspace/calculator.py`
+using real model-generated edits, fixed acceptance tests, tool-stage constraints,
+and an evidence-based completion gate. The operator reported a successful
+Qwen3-VL-2B run (5 model steps, 1 successful edit, latest pytest passed).
+
+The final learning increment adds:
+- `coding/recovery.py`: fingerprints repeated *identical* failed edits against
+  the same file version and error; after three repeats, returns `stalled`
+  rather than consuming the remaining model-step budget.
+- An in-memory pre-run `calculator.py` snapshot, unified diff output, and
+  **opt-in** rollback on unsuccessful runs. Rollback refuses to overwrite
+  external changes detected after the agent's last recorded edit.
+- The model cannot choose arbitrary pytest commands or file paths; only the
+  pre-approved calculator suite is executed.
+
+Offline regression tests (no model service needed):
+
+```powershell
+git switch feat/coding-agent-feedback-loop
+git pull --ff-only origin feat/coding-agent-feedback-loop
+python -m pytest -q
+```
+
+Live demo (start a locally cached Qwen model server first; use the **same**
+`AGENT_MODEL` value for both processes):
+
+```powershell
+$env:AGENT_BASE_URL="http://127.0.0.1:8000/v1"
+$env:AGENT_MODEL="Qwen/Qwen3-VL-2B-Instruct"
+python -m scripts.coding_repair_demo --approve --trace runs/coding_repair_final.jsonl
+```
+
+For an experimental failed run, opt in to restoring only the trusted calculator
+snapshot (the result still records the attempted unified diff):
+
+```powershell
+python -m scripts.coding_repair_demo --approve --rollback-on-failure --trace runs/coding_repair_rollback.jsonl
+```
+
+The snapshot lives only in the current Python process; it is **not** a
+crash-persistent recovery mechanism. It does not detect every concurrent-write
+race, and the file path restriction is not an OS sandbox. Inspect and trust
+the generated code before executing pytest; use isolation for untrusted code.
+
+Full walkthrough: [Calculator repair](docs/coding-repair.md).
