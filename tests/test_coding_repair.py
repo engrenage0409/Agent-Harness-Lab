@@ -59,10 +59,8 @@ def test_wrong_paths_and_unapproved_tools_cannot_execute(tmp_path):
     registry = RepairTools(folder, lambda: runs.append(1) or {
         "exit_code": 0, "timed_out": False, "stdout": "", "stderr": ""
     })
-    assert {definition["function"]["name"] for definition in registry.definitions()} == {
-        "read_file", "edit_file", "run_tests"
-    }
-    assert "error" in registry.execute("read_file", {"path": "../secret.py"})
+    assert {definition["function"]["name"] for definition in registry.definitions()} == {"run_tests"}
+    assert registry.execute("read_file", {"path": "../secret.py"})["error_category"] == "workflow_violation"
     assert "error" in registry.execute("edit_file", {
         "path": "../secret.py", "old_text": "a", "new_text": "b"
     })
@@ -80,11 +78,81 @@ def test_stale_pass_is_invalidated_by_another_edit(tmp_path):
     results = iter([{"exit_code": 1, "timed_out": False},
                     {"exit_code": 0, "timed_out": False}])
     registry = RepairTools(folder, lambda: next(results))
+    registry.definitions()
     registry.execute("run_tests", {})
+    registry.definitions()
+    registry.execute("read_file", {"path": "calculator.py"})
+    registry.definitions()
     registry.execute("edit_file", {
         "path": "calculator.py", "old_text": "1", "new_text": "2"})
+    registry.definitions()
     registry.execute("run_tests", {})
     assert registry.completion_feedback([]) is None
-    registry.execute("edit_file", {
-        "path": "calculator.py", "old_text": "2", "new_text": "3"})
-    assert registry.completion_feedback([]) is not None
+    # A new editing phase requires a new failing test; edits after success are blocked.
+    assert registry.execute("edit_file", {
+        "path": "calculator.py", "old_text": "2", "new_text": "3"
+    })["error_category"] == "workflow_violation"
+    assert registry.completion_feedback([]) is None
+
+
+def test_cannot_edit_before_read_or_repeat_failed_patch(tmp_path):
+    folder = tmp_path / "workspace"
+    folder.mkdir()
+    (folder / "calculator.py").write_text(
+        "def add(a, b): return a - b", encoding="utf-8"
+    )
+    registry = RepairTools(folder, lambda: {
+        "exit_code": 1, "timed_out": False, "stdout": "test_add failed", "stderr": ""
+    })
+    assert [d["function"]["name"] for d in registry.definitions()] == ["run_tests"]
+    assert registry.execute("edit_file", {
+        "path": "calculator.py", "old_text": "-1 == 5", "new_text": "5"
+    })["error_category"] == "workflow_violation"
+
+    registry.execute("run_tests", {})
+    assert [d["function"]["name"] for d in registry.definitions()] == ["read_file"]
+    assert registry.execute("edit_file", {
+        "path": "calculator.py", "old_text": "-1 == 5", "new_text": "5"
+    })["error_category"] == "workflow_violation"
+
+    assert "return a - b" in registry.execute(
+        "read_file", {"path": "calculator.py"}
+    )
+    assert [d["function"]["name"] for d in registry.definitions()] == ["edit_file"]
+    result = registry.execute("edit_file", {
+        "path": "calculator.py", "old_text": "-1 == 5", "new_text": "5"
+    })
+    assert "Expected exactly one match" in result["error"]
+    assert registry.successful_edits == 0
+    assert [d["function"]["name"] for d in registry.definitions()] == ["read_file"]
+    assert registry.execute("edit_file", {
+        "path": "calculator.py", "old_text": "-1 == 5", "new_text": "5"
+    })["error_category"] == "workflow_violation"
+    assert "return a - b" in registry.execute(
+        "read_file", {"path": "calculator.py"}
+    )
+    registry.definitions()
+    assert registry.execute("edit_file", {
+        "path": "calculator.py", "old_text": "return a - b",
+        "new_text": "return a + b"
+    })["replacements"] == 1
+    assert [d["function"]["name"] for d in registry.definitions()] == ["run_tests"]
+
+
+def test_same_turn_tool_chaining_cannot_skip_read(tmp_path):
+    folder = tmp_path / "workspace"
+    folder.mkdir()
+    (folder / "calculator.py").write_text(
+        "def add(a, b): return a - b", encoding="utf-8"
+    )
+    registry = RepairTools(folder, lambda: {
+        "exit_code": 1, "timed_out": False, "stdout": "", "stderr": ""
+    })
+    registry.definitions()
+    registry.execute("run_tests", {})
+    # The prior turn exposed only run_tests; read_file cannot execute
+    # until the subsequent provider request sees new definitions.
+    assert registry.execute("read_file", {
+        "path": "calculator.py"
+    })["error_category"] == "workflow_violation"
+    assert registry.definitions()[0]["function"]["name"] == "read_file"
