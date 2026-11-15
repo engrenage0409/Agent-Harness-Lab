@@ -1,23 +1,25 @@
 """Local document store, optional dense embeddings and optional CrossEncoder reranking."""
 import json
 from pathlib import Path
-from .chunking import chunk_text,load_documents
+from .chunking import chunk_text,chunk_markdown,load_documents
 from .retrieval import Passage,HybridRetriever
 
 def build_passages(document_dir,chunk_size=500,overlap=80):
     passages=[]
     for doc in load_documents(document_dir):
-        for i,text in enumerate(chunk_text(doc["text"],chunk_size,overlap)):
+        splitter=chunk_markdown if doc["source"].lower().endswith(".md") else chunk_text
+        for i,text in enumerate(splitter(doc["text"],chunk_size,overlap)):
             passages.append(Passage(source_id=f"{doc['source']}#chunk-{i}",
                                     source=doc["source"],text=text))
     return passages
 
 class RAGStore:
     def __init__(self,document_dir,dense=False,chunk_size=500,overlap=80,
-                 rerank=False,rerank_candidates=20,backend="local",milvus_uri="runs/rag_milvus.db",model_name=None):
+                 rerank=False,rerank_candidates=20,backend="local",milvus_uri="runs/rag_milvus.db",model_name=None,bm25_weight=1.0,dense_weight=1.0):
         self.passages=build_passages(document_dir,chunk_size,overlap)
         self.retriever=HybridRetriever(self.passages,dense=dense,backend=backend,
-                                         milvus_uri=milvus_uri,model_name=model_name)
+                                         milvus_uri=milvus_uri,model_name=model_name,
+                                         bm25_weight=bm25_weight,dense_weight=dense_weight)
         self.rerank_candidates=rerank_candidates
         if rerank:
             from .rerank import CrossEncoderReranker
