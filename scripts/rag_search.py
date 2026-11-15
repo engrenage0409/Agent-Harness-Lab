@@ -11,11 +11,14 @@ def main():
     parser.add_argument("--milvus-uri",default="runs/rag_milvus.db")
     parser.add_argument("--model-name",default=None,
                         help="SentenceTransformer model (multilingual default for Milvus)")
+    parser.add_argument("--bm25-weight",type=float,default=1.0)
+    parser.add_argument("--dense-weight",type=float,default=1.0)
     parser.add_argument("--rerank",action="store_true",help="CrossEncoder reranking (requires dense extra)")
     parser.add_argument("-k",type=int,default=4)
     args=parser.parse_args()
     store=RAGStore(args.docs,dense=args.dense,rerank=args.rerank,
-                   backend=args.backend,milvus_uri=args.milvus_uri,model_name=args.model_name)
+                   backend=args.backend,milvus_uri=args.milvus_uri,model_name=args.model_name,
+                   bm25_weight=args.bm25_weight,dense_weight=args.dense_weight)
     try:
         print(json.dumps(store.query(args.query,args.k),ensure_ascii=False,indent=2))
     finally:
