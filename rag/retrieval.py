@@ -55,9 +55,19 @@ class DenseIndex:
         return [(self.passages[i],float(scores[i])) for i in order]
 
 class HybridRetriever:
-    def __init__(self,passages,dense=False):
+    def __init__(self,passages,dense=False,backend="local",milvus_uri="runs/rag_milvus.db",model_name=None):
+        if backend not in ("local", "milvus"):
+            raise ValueError("backend must be 'local' or 'milvus'")
         self.sparse=BM25Index(passages)
-        self.dense=DenseIndex(passages) if dense else None
+        self.dense=None
+        if backend == "milvus":
+            from .milvus_backend import MilvusDenseIndex
+            kwargs={"uri":milvus_uri}
+            if model_name: kwargs["model_name"]=model_name
+            self.dense=MilvusDenseIndex(passages,**kwargs)
+        elif dense:
+            kwargs={"model_name":model_name} if model_name else {}
+            self.dense=DenseIndex(passages,**kwargs)
     def search(self,query,k=5):
         if not self.dense: return self.sparse.search(query,k)
         lists=[self.sparse.search(query,max(20,k)),self.dense.search(query,max(20,k))]
