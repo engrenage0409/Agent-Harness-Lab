@@ -29,6 +29,8 @@ def main():
     parser.add_argument("--approve", action="store_true",
                         help="I inspected/trust workspace/calculator.py and authorize pytest execution")
     parser.add_argument("--max-steps", type=int, default=10)
+    parser.add_argument("--rollback-on-failure", action="store_true",
+                        help="Opt-in: restore the approved pre-run calculator after an unsuccessful run")
     parser.add_argument("--trace", default="runs/coding_repair.jsonl")
     args = parser.parse_args()
     if not args.approve:
@@ -43,6 +45,7 @@ def main():
         max_steps=args.max_steps,
         trace_path=repo_root / args.trace,
         completion_check=tools.completion_feedback,
+        stop_check=tools.stop_reason,
     )
     result = runtime.run(
         "Fix the bug in calculator.py. Run tests, read the source, edit the faulty "
@@ -57,6 +60,14 @@ def main():
         ),
     )
     verified = tools.completion_feedback(result.messages) is None
+    diff = tools.checkpoint.diff() if tools.checkpoint else ""
+    rolled_back = False
+    rollback_error = None
+    if args.rollback_on_failure and not (result.status == "completed" and verified):
+        try:
+            rolled_back = tools.checkpoint.rollback() if tools.checkpoint else False
+        except (ValueError, OSError) as exc:
+            rollback_error = str(exc)
     summary = {
         "status": result.status, "steps": result.steps,
         "verified": result.status == "completed" and verified,
@@ -64,6 +75,9 @@ def main():
         "successful_edits": tools.successful_edits,
         "last_test_passed": tools.last_test_passed,
         "answer": result.content,
+        "patch_diff": diff,
+        "rolled_back": rolled_back,
+        "rollback_error": rollback_error,
     }
     print(json.dumps(summary, indent=2, ensure_ascii=False))
     if not summary["verified"]:
