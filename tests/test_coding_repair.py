@@ -219,3 +219,22 @@ def test_phase_change_revokes_same_turn_permission(tmp_path):
     registry.execute('run_tests', {})
     assert registry.execute('run_tests', {})['error_category'] == 'workflow_violation'
     assert runs == [1]
+
+
+def test_stage_guidance_does_not_supply_the_patch(tmp_path):
+    from scripts.coding_repair_demo import PhaseGuidedProvider
+    registry = RepairTools(tmp_path, lambda: {'exit_code': 1})
+    seen = []
+    class Provider:
+        def complete(self, messages, tools):
+            seen.append(messages)
+            return {'content': 'ok'}
+    provider = PhaseGuidedProvider(Provider(), registry)
+    messages = [{'role': 'user', 'content': 'fix'}]
+    registry.phase = 'read'
+    provider.complete(messages, registry.definitions())
+    assert len(messages) == 1
+    assert '{"path":"calculator.py"}' in seen[0][-1]['content']
+    registry.phase = 'edit'
+    assert 'old_text' in registry.completion_feedback([])
+    assert 'a + b' not in registry.next_action()

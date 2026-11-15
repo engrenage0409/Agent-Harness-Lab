@@ -12,6 +12,18 @@ from harness.provider import OpenAICompatibleProvider
 from harness.runtime import AgentRuntime
 
 
+class PhaseGuidedProvider:
+    """Append a current-stage reminder; the model still chooses every edit."""
+    def __init__(self, provider, registry):
+        self.provider = provider
+        self.registry = registry
+
+    def complete(self, messages, tools):
+        return self.provider.complete(messages + [{"role": "user", "content":
+            self.registry.next_action() + " Use a tool call, not a description of actions."
+        }], tools)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--approve", action="store_true",
@@ -27,19 +39,14 @@ def main():
         lambda: run_calculator_tests(repo_root),
     )
     runtime = AgentRuntime(
-        OpenAICompatibleProvider(), tools,
+        PhaseGuidedProvider(OpenAICompatibleProvider(), tools), tools,
         max_steps=args.max_steps,
         trace_path=repo_root / args.trace,
         completion_check=tools.completion_feedback,
     )
     result = runtime.run(
-        "Repair the implementation of calculator.py (never edit the tests). "
-        "First run_tests, then read_file to inspect the actual Python source. "
-        "The pytest assertion such as assert -1 == 5 is diagnostic output, "
-        "NOT a substring to edit in calculator.py. Use the exact source "
-        "expression returned by read_file as old_text for edit_file. "
-        "After a failed edit, read_file again before retrying. "
-        "Finally run_tests again and only finish if it passes.",
+        "Fix the bug in calculator.py. Run tests, read the source, edit the faulty "
+        "function, then run tests again. Never modify tests. Use path calculator.py.",
         system=(
             "You are a coding agent repairing a trusted local example. "
             "Call tools to inspect actual test feedback. Use only the "

@@ -41,10 +41,23 @@ class Workspace:
             raise ValueError("File too large")
         with target.open("r", encoding="utf-8", newline="") as stream:
             content = stream.read()
-        count = content.count(old_text)
+        # Match the normalized text exposed by read(), mapping offsets back
+        # to the original bytes so untouched mixed line endings stay intact.
+        normalized = content.replace("\r\n", "\n")
+        old_text = old_text.replace("\r\n", "\n")
+        new_text = new_text.replace("\r\n", "\n")
+        if old_text == new_text:
+            raise ValueError("new_text must differ from old_text")
+        count = normalized.count(old_text)
         if count != 1:
             raise ValueError(f"Expected exactly one match; found {count}")
-        updated = content.replace(old_text, new_text, 1)
+        offsets = [i for i in range(len(content))
+                   if not (i > 0 and content[i-1:i+1] == "\r\n")] + [len(content)]
+        start = normalized.index(old_text)
+        end = start + len(old_text)
+        if "\r\n" in content and "\n" not in content.replace("\r\n", ""):
+            new_text = new_text.replace("\n", "\r\n")
+        updated = content[:offsets[start]] + new_text + content[offsets[end]:]
         if len(updated.encode("utf-8")) > 100_000:
             raise ValueError("Updated file too large")
 

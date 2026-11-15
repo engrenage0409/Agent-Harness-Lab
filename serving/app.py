@@ -165,12 +165,17 @@ class QwenBackend:
 
     def load(self):
         import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
         self.tokenizer = AutoTokenizer.from_pretrained(
             self.model_id, local_files_only=True
         )
-        self.model = AutoModelForCausalLM.from_pretrained(
+        config = AutoConfig.from_pretrained(self.model_id, local_files_only=True)
+        loader = AutoModelForCausalLM
+        if config.model_type == "qwen3_vl":
+            from transformers import AutoModelForImageTextToText
+            loader = AutoModelForImageTextToText
+        self.model = loader.from_pretrained(
             self.model_id, local_files_only=True, dtype="auto"
         )
         self.model.to("cuda" if torch.cuda.is_available() else "cpu")

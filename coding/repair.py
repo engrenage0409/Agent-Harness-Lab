@@ -23,11 +23,18 @@ def run_calculator_tests(repo_root, timeout=30):
                 "stderr": "Missing acceptance test or calculator.py", "timed_out": False}
     try:
         proc = subprocess.run(
-            [sys.executable, "-m", "pytest", "-q", str(test_file)],
+            [sys.executable, "-m", "pytest", "-q", "--tb=short", str(test_file)],
             cwd=repo_root, capture_output=True, text=True,
             timeout=timeout, check=False,
         )
-        return {"exit_code": proc.returncode, "stdout": proc.stdout[-12000:],
+        # Preserve full diagnostics locally; give the model only test evidence.
+        log = repo_root / "runs" / "calculator_pytest.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.write_text(proc.stdout + proc.stderr, encoding="utf-8")
+        concise = "\n".join(line for line in proc.stdout.splitlines()
+                            if (line.startswith("E ") and "where " not in line) or line.startswith("FAILED ")
+                            or " passed" in line or " failed" in line)
+        return {"exit_code": proc.returncode, "stdout": concise[-4000:],
                 "stderr": proc.stderr[-12000:], "timed_out": False}
     except subprocess.TimeoutExpired:
         return {"exit_code": None, "stdout": "",
@@ -140,11 +147,21 @@ class RepairTools(ToolRegistry):
             self.phase = "done"
         return result
 
+    def next_action(self):
+        return {
+            "test": 'Call run_tests with arguments {} now.',
+            "read": 'Call read_file with arguments {"path":"calculator.py"} now.',
+            "edit": ('Call edit_file now with path="calculator.py", old_text copied exactly '
+                     'from the source returned by read_file, and new_text containing your fix. '
+                     'Change implementation only. Do not copy pytest output into the file. '
+                     'Use valid JSON strings with escaped line breaks. Include the function definition '
+                     'in old_text so the match is unique.'),
+            "verify": 'Call run_tests with arguments {} now to verify your edit.',
+            "done": 'Report the actual test outcome. Do not call more tools.',
+        }[self.phase]
+
     def completion_feedback(self, _messages):
-        if not self.saw_failing_test:
-            return "Not finished: first run run_tests to observe the failing test."
-        if self.successful_edits < 1:
-            return "Not finished: read calculator.py and fix the source, not the test assertion."
-        if self.test_version != self.edit_version or not self.last_test_passed:
-            return "Not finished: run_tests must pass AFTER the latest edit."
-        return None
+        if (self.saw_failing_test and self.successful_edits > 0
+                and self.test_version == self.edit_version and self.last_test_passed):
+            return None
+        return "Repair is not verified. " + self.next_action()
