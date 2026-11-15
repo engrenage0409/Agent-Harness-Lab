@@ -5,6 +5,7 @@ run_tests is registered. The model cannot select commands or test paths.
 """
 import subprocess
 import sys
+from coding.recovery import FileCheckpoint, ProgressTracker
 from pathlib import Path
 
 from coding.sandbox import EDIT_DESCRIPTION, Workspace
@@ -55,6 +56,8 @@ class RepairTools(ToolRegistry):
         self.successful_edits = 0
         self.phase = "test"  # test -> read -> edit -> verify; failed edit -> read
         self.exposed = set()
+        self.checkpoint = FileCheckpoint(self.workspace.resolve(TARGET))
+        self.progress = ProgressTracker(repeat_limit=3)
 
         self.add(Tool(
             "read_file", "Read calculator.py in the approved workspace.",
@@ -86,6 +89,7 @@ class RepairTools(ToolRegistry):
             "edit": {"edit_file"},
             "verify": {"run_tests"},
             "done": set(),
+            "stalled": set(),
         }[self.phase]
         self.exposed = allowed.copy()
         return [tool.definition() for name, tool in self.tools.items()
@@ -102,14 +106,17 @@ class RepairTools(ToolRegistry):
             )
         # ToolRegistry handles schema validation and returns structured errors.
         previous_phase = self.phase
+        source_hash = self.checkpoint.expected_hash
         result = super().execute(name, arguments)
         if self.phase != previous_phase:
             # No further call in this reply may reuse the previous phase.
             self.exposed = set()
         if name == "edit_file" and isinstance(result, dict) and "error" in result:
             # A bad patch must not be repeated without rereading the source.
-            self.phase = "read"
+            count = self.progress.record_failure(source_hash, arguments or {}, result["error"])
+            self.phase = "stalled" if self.progress.stalled else "read"
             self.exposed = set()
+            result["repeated_failure_count"] = count
             result["next_action"] = self.next_action()
         return result
 
@@ -126,7 +133,10 @@ class RepairTools(ToolRegistry):
 
     def edit_file(self, path, old_text, new_text):
         self._check_path(path)
+        self.checkpoint.ensure_unchanged()
         result = self.workspace.edit(path, old_text, new_text)
+        self.checkpoint.record_edit()
+        self.progress.reset()
         self.edit_version += 1
         self.successful_edits += 1
         self.last_test_passed = False
@@ -156,7 +166,11 @@ class RepairTools(ToolRegistry):
                      ' Change implementation only. Do not copy pytest output into the file.'),
             "verify": 'Call run_tests with arguments {} now to verify your edit.',
             "done": 'Report the actual test outcome. Do not call more tools.',
+            "stalled": "Stop: the identical edit failed repeatedly. Report the blockage.",
         }[self.phase]
+
+    def stop_reason(self):
+        return "stalled" if self.progress.stalled else None
 
     def completion_feedback(self, _messages):
         if (self.saw_failing_test and self.successful_edits > 0
